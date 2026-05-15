@@ -4,12 +4,9 @@
     "slug": "shots-app",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
-    "splash": {
-      "resizeMode": "contain",
-      "backgroundColor": "#0A0A0A"
-    },
     "assetBundlePatterns": [
       "**/*"
     ],
@@ -19,11 +16,26 @@
     },
     "android": {
       "edgeToEdgeEnabled": true,
-      "package": "com.shotsapp.staff"
+      "package": "com.shotsapp.staff",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0A0A0A"
+      }
     },
     "web": {
       "bundler": "metro"
     },
+    "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#0A0A0A"
+        }
+      ]
+    ],
     "extra": {
       "eas": {
         "projectId": "a153b3bc-a4d1-46ed-9e5f-2601a96ed874"
