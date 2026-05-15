@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Shots",
+    "slug": "shots-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0A0A0A"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.shotsapp.staff"
+    },
+    "android": {
+      "edgeToEdgeEnabled": true,
+      "package": "com.shotsapp.staff",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#0A0A0A"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "a153b3bc-a4d1-46ed-9e5f-2601a96ed874"
+      }
+    },
+    "owner": "abdullahg144"
+  }
+}
