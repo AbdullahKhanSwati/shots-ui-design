@@ -9,8 +9,9 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { colors, gradients, typography, spacing, borderRadius, shadows } from '../styles/theme';
-import { mockTables, mockBookings, tableFreeIn } from '../data/mockData';
+import { mockTables, mockBookings, sortBookingsByTableThenTime, dateKey } from '../data/mockData';
 import TableCard from '../components/TableCard';
 import SearchBar from '../components/SearchBar';
 import FilterChips from '../components/FilterChips';
@@ -33,6 +34,13 @@ const TablesScreen = ({ navigation }) => {
   const [status, setStatus] = useState('All');
   const [type, setType] = useState('All');
   const [tab, setTab] = useState('Tables'); // 'Tables' | 'Bookings'
+  const [tick, setTick] = useState(0);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      setTick((t) => t + 1);
+    }, [])
+  );
 
   const filtered = useMemo(() => {
     return mockTables.filter((t) => {
@@ -48,7 +56,25 @@ const TablesScreen = ({ navigation }) => {
     });
   }, [query, status, type]);
 
-  const todayBookings = mockBookings;
+  // Today's bookings — grouped by table, sorted by time within each table
+  const grouped = useMemo(() => {
+    const todayKey = dateKey(new Date());
+    const todayList = mockBookings.filter((b) => b.date === todayKey);
+    const sorted = sortBookingsByTableThenTime(todayList);
+    const map = new Map();
+    sorted.forEach((b) => {
+      if (!map.has(b.tableId)) map.set(b.tableId, []);
+      map.get(b.tableId).push(b);
+    });
+    return Array.from(map.entries()); // [[tableId, bookings], ...]
+  }, [tick]);
+
+  const totalRevenue = useMemo(() => {
+    const todayKey = dateKey(new Date());
+    return mockBookings
+      .filter((b) => b.date === todayKey)
+      .reduce((s, b) => s + (b.amount || 0), 0);
+  }, [tick]);
 
   return (
     <View style={styles.root}>
@@ -57,12 +83,11 @@ const TablesScreen = ({ navigation }) => {
           <TouchableOpacity onPress={() => navigation.openDrawer?.()} style={styles.iconBtn} hitSlop={10}>
             <Ionicons name="menu" size={20} color={colors.white} />
           </TouchableOpacity>
-          <Text style={styles.heroTitle}>Tables</Text>
+          <Text style={styles.heroTitle}>Bookings</Text>
           <TouchableOpacity style={styles.iconBtn} hitSlop={10}>
             <Ionicons name="options-outline" size={18} color={colors.white} />
           </TouchableOpacity>
         </View>
-        <Text style={styles.heroSubtitle}>Live floor & today's bookings</Text>
 
         <View style={styles.tabsRow}>
           {['Tables', 'Bookings'].map((t) => (
@@ -89,7 +114,7 @@ const TablesScreen = ({ navigation }) => {
           </View>
 
           <ScrollView
-            contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 90 }]}
+            contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 110 }]}
             showsVerticalScrollIndicator={false}
           >
             {filtered.length === 0 ? (
@@ -111,47 +136,69 @@ const TablesScreen = ({ navigation }) => {
         </>
       ) : (
         <ScrollView
-          contentContainerStyle={[styles.list, { paddingTop: spacing.md, paddingBottom: insets.bottom + 90 }]}
+          contentContainerStyle={[styles.list, { paddingTop: spacing.md, paddingBottom: insets.bottom + 110 }]}
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.bookingSummary}>
-            <SummaryItem icon="checkmark-done" label="Active" value={todayBookings.filter((b) => b.status === 'Active').length} color={colors.success} />
-            <SummaryItem icon="time" label="Completed" value={todayBookings.filter((b) => b.status === 'Completed').length} color={colors.primary} />
-            <SummaryItem icon="cash" label="Revenue" value={`Rs. ${todayBookings.reduce((s, b) => s + b.amount, 0)}`} color={colors.warning} />
+            <SummaryItem icon="grid" label="Tables" value={grouped.length} color={colors.primary} />
+            <SummaryItem icon="checkmark-done" label="Bookings" value={grouped.reduce((s, [, list]) => s + list.length, 0)} color={colors.success} />
+            <SummaryItem icon="cash" label="Revenue" value={`Rs. ${totalRevenue.toLocaleString()}`} color={colors.warning} />
           </View>
 
-          <Text style={styles.sectionTitle}>Today's Bookings</Text>
-
-          {todayBookings.map((b) => (
-            <View key={b.id} style={styles.bookingCard}>
-              <View style={[styles.bookingTime, b.status === 'Active' && { backgroundColor: colors.successSoft }]}>
-                <Text style={[styles.bookingTimeText, b.status === 'Active' && { color: colors.success }]}>
-                  {b.start}
-                </Text>
-                <Text style={[styles.bookingTimeText, b.status === 'Active' && { color: colors.success }, { fontSize: 10 }]}>
-                  {b.end}
-                </Text>
-              </View>
-              <View style={{ flex: 1, marginLeft: spacing.md }}>
-                <View style={styles.bookingTitleRow}>
-                  <Text style={styles.bookingName}>{b.memberName}</Text>
-                  <View style={[styles.statusPill, b.status === 'Active' ? styles.pillActive : styles.pillDone]}>
-                    <Text style={[styles.statusPillText, { color: b.status === 'Active' ? colors.success : colors.textLight }]}>
-                      {b.status}
-                    </Text>
+          {grouped.length === 0 ? (
+            <View style={styles.empty}>
+              <Ionicons name="calendar-outline" size={48} color={colors.textMuted} />
+              <Text style={styles.emptyText}>No bookings today</Text>
+            </View>
+          ) : (
+            grouped.map(([tableId, list]) => (
+              <View key={tableId} style={{ marginBottom: spacing.md }}>
+                <View style={styles.groupHeader}>
+                  <View style={styles.groupBubble}>
+                    <Text style={styles.groupBubbleText}>T{list[0].tableNumber}</Text>
+                  </View>
+                  <Text style={styles.groupTitle}>Table #{list[0].tableNumber}</Text>
+                  <View style={styles.groupCount}>
+                    <Text style={styles.groupCountText}>{list.length}</Text>
                   </View>
                 </View>
-                <View style={styles.bookingMeta}>
-                  <Ionicons name="grid" size={11} color={colors.primary} />
-                  <Text style={styles.bookingMetaText}>Table #{b.tableNumber}</Text>
-                  <Text style={styles.bookingDot}>•</Text>
-                  <Ionicons name="person" size={11} color={colors.textLight} />
-                  <Text style={styles.bookingMetaText}>{b.memberId}</Text>
-                </View>
-                <Text style={styles.bookingAmt}>Rs. {b.amount.toLocaleString()}</Text>
+
+                {list.map((b) => (
+                  <TouchableOpacity
+                    key={b.id}
+                    activeOpacity={0.85}
+                    onPress={() => navigation.navigate('TableDetail', { tableId: b.tableId })}
+                    style={styles.bookingCard}
+                  >
+                    <View style={[styles.bookingTime, b.status === 'Active' && { backgroundColor: colors.successSoft }]}>
+                      <Text style={[styles.bookingTimeText, b.status === 'Active' && { color: colors.success }]}>{b.start}</Text>
+                      <Text style={[styles.bookingTimeText, b.status === 'Active' && { color: colors.success }, { fontSize: 10 }]}>{b.end}</Text>
+                    </View>
+                    <View style={{ flex: 1, marginLeft: spacing.md }}>
+                      <View style={styles.bookingTitleRow}>
+                        <Text style={styles.bookingName} numberOfLines={1}>{b.memberName}</Text>
+                        <View style={[styles.statusPill, b.status === 'Active' ? styles.pillActive : styles.pillDone]}>
+                          <Text style={[styles.statusPillText, { color: b.status === 'Active' ? colors.success : colors.textLight }]}>
+                            {b.status}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={styles.bookingMeta}>
+                        <Ionicons name="people" size={11} color={colors.textLight} />
+                        <Text style={styles.bookingMetaText}>
+                          {b.members?.length || 1} {(b.members?.length || 1) > 1 ? 'players' : 'player'}
+                        </Text>
+                        <Text style={styles.bookingDot}>•</Text>
+                        <Ionicons name={b.isMember ? 'diamond' : 'person'} size={11} color={colors.textLight} />
+                        <Text style={styles.bookingMetaText}>{b.isMember ? 'Member' : 'Guest'}</Text>
+                      </View>
+                      <Text style={styles.bookingAmt}>Rs. {b.amount.toLocaleString()}</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
               </View>
-            </View>
-          ))}
+            ))
+          )}
         </ScrollView>
       )}
     </View>
@@ -190,59 +237,31 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   heroTitle: { ...typography.h3, color: colors.white },
-  heroSubtitle: {
-    ...typography.bodySmall,
-    color: 'rgba(255,255,255,0.85)',
-    textAlign: 'center',
-    marginTop: -16,
-    marginBottom: spacing.md,
-  },
   tabsRow: {
     flexDirection: 'row',
     backgroundColor: 'rgba(0,0,0,0.22)',
     borderRadius: borderRadius.lg,
     padding: 4,
-    marginTop: spacing.sm,
+    marginTop: spacing.md,
   },
-  tab: {
-    flex: 1,
-    paddingVertical: spacing.sm + 2,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-  },
+  tab: { flex: 1, paddingVertical: spacing.sm + 2, borderRadius: borderRadius.md, alignItems: 'center' },
   tabActive: { backgroundColor: colors.white },
   tabText: { ...typography.bodySmall, color: 'rgba(255,255,255,0.85)', fontWeight: '700' },
   tabTextActive: { color: colors.primary },
-  controls: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-  },
-  filterStack: {
-    paddingTop: spacing.sm,
-    gap: spacing.xs,
-  },
-  list: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-  },
+  controls: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
+  filterStack: { paddingTop: spacing.sm, gap: spacing.xs },
+  list: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm },
   empty: { alignItems: 'center', paddingTop: spacing.xxxl, gap: spacing.md },
   emptyText: { ...typography.bodySmall, color: colors.textLight },
-  sectionTitle: { ...typography.h4, color: colors.text, marginVertical: spacing.md },
-  bookingSummary: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
+
+  bookingSummary: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
   summaryItem: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     backgroundColor: colors.surface,
     padding: spacing.md,
     borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: 1, borderColor: colors.border,
     ...shadows.sm,
   },
   summaryIcon: {
@@ -251,14 +270,38 @@ const styles = StyleSheet.create({
   },
   summaryValue: { ...typography.body, color: colors.text, fontWeight: '800' },
   summaryLabel: { fontSize: 10, color: colors.textLight, fontWeight: '700' },
+
+  groupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  groupBubble: {
+    width: 28, height: 28,
+    borderRadius: borderRadius.sm,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  groupBubbleText: { ...typography.caption, color: colors.primaryDark, fontWeight: '800' },
+  groupTitle: { flex: 1, ...typography.h4, color: colors.text },
+  groupCount: {
+    minWidth: 24, height: 22,
+    paddingHorizontal: 8,
+    borderRadius: 11,
+    backgroundColor: colors.surfaceAlt,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  groupCountText: { fontSize: 11, color: colors.textLight, fontWeight: '800' },
+
   bookingCard: {
     flexDirection: 'row',
     backgroundColor: colors.surface,
     padding: spacing.md,
     borderRadius: borderRadius.lg,
     marginBottom: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: 1, borderColor: colors.border,
     ...shadows.xs,
   },
   bookingTime: {
@@ -266,30 +309,16 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     backgroundColor: colors.surfaceAlt,
     borderRadius: borderRadius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: 'center', justifyContent: 'center',
   },
   bookingTimeText: { ...typography.caption, color: colors.text, fontWeight: '800' },
-  bookingTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  bookingName: { ...typography.bodySmall, color: colors.text, fontWeight: '700' },
-  statusPill: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: borderRadius.round,
-  },
+  bookingTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+  bookingName: { flex: 1, ...typography.bodySmall, color: colors.text, fontWeight: '700' },
+  statusPill: { paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: borderRadius.round },
   pillActive: { backgroundColor: colors.successSoft },
   pillDone: { backgroundColor: colors.surfaceAlt },
   statusPillText: { fontSize: 10, fontWeight: '700' },
-  bookingMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 4,
-  },
+  bookingMeta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
   bookingMetaText: { ...typography.caption, color: colors.textLight, textTransform: 'none', letterSpacing: 0 },
   bookingDot: { color: colors.textMuted, marginHorizontal: 4 },
   bookingAmt: { ...typography.bodySmall, color: colors.primary, fontWeight: '800', marginTop: 4 },

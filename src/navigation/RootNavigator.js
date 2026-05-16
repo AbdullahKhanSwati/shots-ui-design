@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, View, Platform } from 'react-native';
+import { StyleSheet, Platform } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createDrawerNavigator } from '@react-navigation/drawer';
@@ -26,16 +26,17 @@ const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 const Drawer = createDrawerNavigator();
 
-const ICONS = {
-  Dashboard:   { active: 'home', inactive: 'home-outline' },
-  Memberships: { active: 'people', inactive: 'people-outline' },
-  Tables:      { active: 'grid', inactive: 'grid-outline' },
-  Finance:     { active: 'wallet', inactive: 'wallet-outline' },
+// Same order as the side drawer
+const TAB_ICONS = {
+  Dashboard:   { active: 'home',    inactive: 'home-outline' },
+  Members:     { active: 'people',  inactive: 'people-outline' },
+  Bookings:    { active: 'grid',    inactive: 'grid-outline' },
+  Finance:     { active: 'wallet',  inactive: 'wallet-outline' },
+  Expense:     { active: 'receipt', inactive: 'receipt-outline' },
 };
 
 const DashboardTabNavigator = () => {
   const insets = useSafeAreaInsets();
-  const bottomPad = (insets.bottom || (Platform.OS === 'android' ? 8 : 16)) + 6;
 
   return (
     <Tab.Navigator
@@ -45,24 +46,22 @@ const DashboardTabNavigator = () => {
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textMuted,
         tabBarLabelStyle: {
-          fontSize: 11,
+          fontSize: 10,
           fontWeight: '700',
           marginTop: 2,
           marginBottom: 0,
         },
-        tabBarItemStyle: {
-          paddingTop: 6,
-        },
+        tabBarItemStyle: { paddingTop: 6 },
         tabBarStyle: {
           position: 'absolute',
-          left: 14,
-          right: 14,
+          left: 12,
+          right: 12,
           bottom: (insets.bottom || 0) + 10,
           height: 64,
           borderRadius: 24,
           backgroundColor: colors.surface,
           borderTopWidth: 0,
-          paddingHorizontal: 6,
+          paddingHorizontal: 4,
           shadowColor: '#0A0A0A',
           shadowOffset: { width: 0, height: 8 },
           shadowOpacity: 0.12,
@@ -70,7 +69,7 @@ const DashboardTabNavigator = () => {
           elevation: 14,
         },
         tabBarIcon: ({ focused, color }) => {
-          const meta = ICONS[route.name];
+          const meta = TAB_ICONS[route.name];
           if (!meta) return null;
           if (focused) {
             return (
@@ -80,18 +79,19 @@ const DashboardTabNavigator = () => {
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
               >
-                <Ionicons name={meta.active} size={18} color={colors.white} />
+                <Ionicons name={meta.active} size={16} color={colors.white} />
               </LinearGradient>
             );
           }
-          return <Ionicons name={meta.inactive} size={22} color={color} />;
+          return <Ionicons name={meta.inactive} size={20} color={color} />;
         },
       })}
     >
-      <Tab.Screen name="Dashboard" component={DashboardScreen} />
-      <Tab.Screen name="Memberships" component={MembershipsScreen} />
-      <Tab.Screen name="Tables" component={TablesScreen} />
-      <Tab.Screen name="Finance" component={FinanceScreen} />
+      <Tab.Screen name="Dashboard"   component={DashboardScreen} />
+      <Tab.Screen name="Members"     component={MembershipsScreen} />
+      <Tab.Screen name="Bookings"    component={TablesScreen} />
+      <Tab.Screen name="Finance"     component={FinanceScreen} />
+      <Tab.Screen name="Expense"     component={AddExpenseScreen} options={{ title: 'Add' }} />
     </Tab.Navigator>
   );
 };
@@ -129,16 +129,15 @@ const RootNavigator = () => {
       <Stack.Screen name="MemberDetail" component={MemberDetailScreen} />
       <Stack.Screen name="TableDetail" component={TableDetailScreen} />
       <Stack.Screen name="BookingForm" component={BookingFormScreen} />
-      <Stack.Screen name="AddExpense" component={AddExpenseScreen} />
     </Stack.Navigator>
   );
 };
 
 const styles = StyleSheet.create({
   activeIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: colors.primary,

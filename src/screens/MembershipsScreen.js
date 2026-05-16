@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   FlatList,
+  Modal,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -28,6 +29,7 @@ const MembershipsScreen = ({ navigation }) => {
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('All');
+  const [scanOpen, setScanOpen] = useState(false);
 
   const list = useMemo(() => {
     return mockMemberships.filter((m) => {
@@ -56,9 +58,14 @@ const MembershipsScreen = ({ navigation }) => {
             <Ionicons name="menu" size={20} color={colors.white} />
           </TouchableOpacity>
           <Text style={styles.heroTitle}>Memberships</Text>
-          <TouchableOpacity style={styles.iconBtn} hitSlop={10} onPress={() => navigation.navigate('AddMember')}>
-            <Ionicons name="add" size={22} color={colors.white} />
-          </TouchableOpacity>
+          <View style={styles.heroActions}>
+            <TouchableOpacity style={styles.iconBtn} hitSlop={10} onPress={() => setScanOpen(true)}>
+              <Ionicons name="scan-outline" size={20} color={colors.white} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.iconBtn} hitSlop={10} onPress={() => navigation.navigate('AddMember')}>
+              <Ionicons name="add" size={22} color={colors.white} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={styles.statsRow}>
@@ -103,6 +110,27 @@ const MembershipsScreen = ({ navigation }) => {
           <Ionicons name="person-add" size={22} color={colors.white} />
         </LinearGradient>
       </TouchableOpacity>
+
+      {/* Scan QR — placeholder; camera wiring requires expo-camera */}
+      <Modal visible={scanOpen} transparent animationType="fade" onRequestClose={() => setScanOpen(false)}>
+        <View style={styles.scanOverlay}>
+          <View style={styles.scanCard}>
+            <TouchableOpacity onPress={() => setScanOpen(false)} hitSlop={10} style={styles.scanClose}>
+              <Ionicons name="close" size={20} color={colors.white} />
+            </TouchableOpacity>
+            <View style={styles.scanFrame}>
+              <View style={[styles.corner, styles.cornerTL]} />
+              <View style={[styles.corner, styles.cornerTR]} />
+              <View style={[styles.corner, styles.cornerBL]} />
+              <View style={[styles.corner, styles.cornerBR]} />
+              <Ionicons name="qr-code" size={70} color="rgba(255,255,255,0.4)" />
+              <View style={styles.scanLine} />
+            </View>
+            <Text style={styles.scanTitle}>Scan Member QR</Text>
+            <Text style={styles.scanHint}>Align the QR code inside the frame.</Text>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -144,6 +172,7 @@ const styles = StyleSheet.create({
     ...typography.h3,
     color: colors.white,
   },
+  heroActions: { flexDirection: 'row', gap: spacing.sm },
   statsRow: {
     flexDirection: 'row',
     gap: spacing.sm,
@@ -192,6 +221,56 @@ const styles = StyleSheet.create({
     borderRadius: 29,
     alignItems: 'center', justifyContent: 'center',
   },
+
+  scanOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(10, 10, 10, 0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.lg,
+  },
+  scanCard: {
+    width: '100%',
+    alignItems: 'center',
+    paddingVertical: spacing.xxl,
+  },
+  scanClose: {
+    position: 'absolute',
+    top: 0, right: 0,
+    width: 40, height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  scanFrame: {
+    width: 240, height: 240,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: borderRadius.lg,
+    alignItems: 'center', justifyContent: 'center',
+    overflow: 'hidden',
+    marginBottom: spacing.lg,
+  },
+  scanLine: {
+    position: 'absolute',
+    left: 16, right: 16, top: '50%',
+    height: 2,
+    backgroundColor: colors.primary,
+    shadowColor: colors.primary,
+    shadowOpacity: 0.9,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 0 },
+  },
+  corner: {
+    position: 'absolute',
+    width: 28, height: 28,
+    borderColor: colors.primary,
+  },
+  cornerTL: { top: 8, left: 8, borderTopWidth: 3, borderLeftWidth: 3, borderTopLeftRadius: 8 },
+  cornerTR: { top: 8, right: 8, borderTopWidth: 3, borderRightWidth: 3, borderTopRightRadius: 8 },
+  cornerBL: { bottom: 8, left: 8, borderBottomWidth: 3, borderLeftWidth: 3, borderBottomLeftRadius: 8 },
+  cornerBR: { bottom: 8, right: 8, borderBottomWidth: 3, borderRightWidth: 3, borderBottomRightRadius: 8 },
+  scanTitle: { ...typography.h3, color: colors.white },
+  scanHint: { ...typography.bodySmall, color: 'rgba(255,255,255,0.65)', marginTop: 4, textAlign: 'center' },
 });
 
 export default MembershipsScreen;

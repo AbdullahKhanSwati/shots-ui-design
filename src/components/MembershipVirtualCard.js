@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
 import { colors, gradients, typography, spacing, borderRadius, shadows } from '../styles/theme';
 
-// Virtual bank-style membership card with QR + photo
+// Virtual bank-style membership card with QR + photo (no CNIC shown)
 const MembershipVirtualCard = ({ member, compact }) => {
   if (!member) return null;
   const tierIcon = {
@@ -14,11 +14,11 @@ const MembershipVirtualCard = ({ member, compact }) => {
     Basic: 'ribbon',
   }[member.type] || 'card';
 
+  // QR encodes the public-safe fields only
   const qrPayload = JSON.stringify({
     id: member.id,
     name: member.name,
     type: member.type,
-    cnic: member.idCardNumber,
     exp: member.expiryDate,
   });
 
@@ -91,11 +91,11 @@ const MembershipVirtualCard = ({ member, compact }) => {
           </View>
         </View>
 
-        {/* Bottom: CNIC + status */}
+        {/* Bottom: status only (CNIC removed) */}
         <View style={styles.bottomRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.fieldLabel}>CNIC</Text>
-            <Text style={styles.fieldValue}>{member.idCardNumber || '—'}</Text>
+            <Text style={styles.fieldLabel}>Membership</Text>
+            <Text style={styles.fieldValue}>Issued by Shots Club</Text>
           </View>
           <View style={styles.statusGroup}>
             <View style={[styles.statusDot, { backgroundColor: member.status === 'Active' ? colors.success : colors.error }]} />
@@ -126,134 +126,48 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.06)',
   },
   cardCompact: { minHeight: 190, padding: spacing.md + 2 },
-  glow: {
-    position: 'absolute',
-    width: 220, height: 220, borderRadius: 110,
-    backgroundColor: '#E53E3E', opacity: 0.18,
-  },
+  glow: { position: 'absolute', width: 220, height: 220, borderRadius: 110, backgroundColor: '#E53E3E', opacity: 0.18 },
   glowTopRight: { top: -100, right: -90 },
   glowBottomLeft: { bottom: -120, left: -100, backgroundColor: '#7F1318', opacity: 0.4 },
-  topRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: spacing.md,
-  },
-  brand: {
-    ...typography.h3,
-    color: colors.white,
-    letterSpacing: 3,
-    fontWeight: '900',
-  },
-  brandSub: {
-    ...typography.caption,
-    color: 'rgba(255,255,255,0.65)',
-    marginTop: 2,
-  },
+  topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: spacing.md },
+  brand: { ...typography.h3, color: colors.white, letterSpacing: 3, fontWeight: '900' },
+  brandSub: { ...typography.caption, color: 'rgba(255,255,255,0.65)', marginTop: 2 },
   tierBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
+    flexDirection: 'row', alignItems: 'center', gap: 4,
     backgroundColor: 'rgba(244, 184, 96, 0.18)',
-    borderWidth: 1,
-    borderColor: 'rgba(244, 184, 96, 0.4)',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
+    borderWidth: 1, borderColor: 'rgba(244, 184, 96, 0.4)',
+    paddingHorizontal: spacing.sm, paddingVertical: 4,
     borderRadius: borderRadius.round,
   },
-  tierText: {
-    ...typography.caption,
-    color: colors.gold,
-    fontWeight: '700',
-  },
-  middleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    marginBottom: spacing.md,
-  },
-  photoWrap: { },
-  photo: {
-    width: 64, height: 64,
-    borderRadius: borderRadius.md,
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.25)',
-  },
-  photoFallback: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  photoInitials: {
-    ...typography.h2,
-    color: colors.white,
-    fontWeight: '900',
-  },
+  tierText: { ...typography.caption, color: colors.gold, fontWeight: '700' },
+  middleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: spacing.md },
+  photoWrap: {},
+  photo: { width: 64, height: 64, borderRadius: borderRadius.md, borderWidth: 2, borderColor: 'rgba(255,255,255,0.25)' },
+  photoFallback: { backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' },
+  photoInitials: { ...typography.h2, color: colors.white, fontWeight: '900' },
   infoCol: { flex: 1 },
   fieldLabel: {
-    fontSize: 9,
-    color: 'rgba(255,255,255,0.55)',
-    fontWeight: '700',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    marginBottom: 2,
+    fontSize: 9, color: 'rgba(255,255,255,0.55)', fontWeight: '700',
+    letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2,
   },
-  fieldValueLg: {
-    ...typography.h4,
-    color: colors.white,
-    letterSpacing: 0.3,
-  },
-  fieldValue: {
-    ...typography.bodySmall,
-    color: colors.white,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    marginTop: spacing.sm,
-    gap: spacing.sm,
-  },
-  qrWrap: {
-    alignItems: 'center',
-  },
-  qrInner: {
-    padding: 4,
-    backgroundColor: colors.white,
-    borderRadius: 6,
-  },
-  qrLabel: {
-    fontSize: 8,
-    color: 'rgba(255,255,255,0.7)',
-    marginTop: 4,
-    letterSpacing: 2,
-    fontWeight: '800',
-  },
+  fieldValueLg: { ...typography.h4, color: colors.white, letterSpacing: 0.3 },
+  fieldValue: { ...typography.bodySmall, color: colors.white, fontWeight: '700', letterSpacing: 0.3 },
+  metaRow: { flexDirection: 'row', marginTop: spacing.sm, gap: spacing.sm },
+  qrWrap: { alignItems: 'center' },
+  qrInner: { padding: 4, backgroundColor: colors.white, borderRadius: 6 },
+  qrLabel: { fontSize: 8, color: 'rgba(255,255,255,0.7)', marginTop: 4, letterSpacing: 2, fontWeight: '800' },
   bottomRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 'auto',
-    paddingTop: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.1)',
+    flexDirection: 'row', alignItems: 'center', marginTop: 'auto',
+    paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)',
   },
   statusGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
+    flexDirection: 'row', alignItems: 'center', gap: 4,
     backgroundColor: 'rgba(255,255,255,0.08)',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
+    paddingHorizontal: spacing.sm, paddingVertical: 4,
     borderRadius: borderRadius.round,
   },
-  statusDot: {
-    width: 6, height: 6, borderRadius: 3,
-  },
-  statusText: {
-    ...typography.caption,
-    color: colors.white,
-    fontWeight: '700',
-  },
+  statusDot: { width: 6, height: 6, borderRadius: 3 },
+  statusText: { ...typography.caption, color: colors.white, fontWeight: '700' },
 });
 
 export default MembershipVirtualCard;

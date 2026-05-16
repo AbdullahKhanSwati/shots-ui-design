@@ -14,7 +14,7 @@ const MenuDrawer = ({ navigation }) => {
       items: [
         { icon: 'home-outline', label: 'Dashboard', onPress: () => navigation.navigate('MainTabs', { screen: 'Dashboard' }) },
         { icon: 'people-outline', label: 'Memberships', onPress: () => navigation.navigate('MainTabs', { screen: 'Memberships' }) },
-        { icon: 'grid-outline', label: 'Tables', onPress: () => navigation.navigate('MainTabs', { screen: 'Tables' }) },
+        { icon: 'grid-outline', label: 'Bookings', onPress: () => navigation.navigate('MainTabs', { screen: 'Bookings' }) },
         { icon: 'wallet-outline', label: 'Finance', onPress: () => navigation.navigate('MainTabs', { screen: 'Finance' }) },
       ],
     },

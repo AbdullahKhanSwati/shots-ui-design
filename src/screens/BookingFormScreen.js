@@ -1,21 +1,25 @@
 import React, { useMemo, useState } from 'react';
 import {
   Alert,
+  Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  TouchableOpacity,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, typography, spacing, borderRadius, shadows } from '../styles/theme';
 import {
-  mockTables, mockMemberships,
-  addBooking, intervalsForRange, bookedIntervalsFor, addMinutes,
+  mockTables, mockMemberships, mockBookings,
+  addBooking, updateBooking,
+  intervalsForRange, bookedIntervalsFor, addMinutes,
 } from '../data/mockData';
 import GradientButton from '../components/GradientButton';
 import ScreenHeader from '../components/ScreenHeader';
@@ -24,71 +28,136 @@ const DURATIONS = [
   { label: '15 min', minutes: 15 },
   { label: '30 min', minutes: 30 },
   { label: '45 min', minutes: 45 },
-  { label: '1 h', minutes: 60 },
-  { label: '1.5 h', minutes: 90 },
-  { label: '2 h', minutes: 120 },
-  { label: '3 h', minutes: 180 },
+  { label: '1 h',    minutes: 60 },
+  { label: '1.5 h',  minutes: 90 },
+  { label: '2 h',    minutes: 120 },
+  { label: '3 h',    minutes: 180 },
 ];
+
+const MAX_MEMBERS = 4;
 
 const BookingFormScreen = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
-  const { tableId, date, startValue, startLabel } = route.params || {};
+  const { tableId, date, startValue, startLabel, bookingId } = route.params || {};
   const table = mockTables.find((t) => t.id === tableId) || mockTables[0];
+  const editing = !!bookingId;
+  const existing = editing ? mockBookings.find((b) => b.id === bookingId) : null;
 
-  const [duration, setDuration] = useState(DURATIONS[3]); // 1h
-  const [isMember, setIsMember] = useState(true);
-  const [member, setMember] = useState(mockMemberships[0]);
-  const [guestName, setGuestName] = useState('');
+  const initialDuration = useMemo(() => {
+    if (!existing) return DURATIONS[3]; // 1h
+    const mins = (existing.intervals?.length || 4) * 15;
+    return DURATIONS.find((d) => d.minutes === mins) || DURATIONS[3];
+  }, [existing]);
+
+  const [duration, setDuration] = useState(initialDuration);
+  const [isMember, setIsMember] = useState(existing ? existing.isMember !== false : true);
+  const [members, setMembers] = useState(existing?.members?.slice(0, MAX_MEMBERS) || [mockMemberships[0]]);
+  const [guestName, setGuestName] = useState(existing && !existing.isMember ? existing.memberName : '');
   const [guestPhone, setGuestPhone] = useState('');
+  const [memberPickerOpen, setMemberPickerOpen] = useState(false);
 
-  const endValue = useMemo(() => addMinutes(startValue, duration.minutes), [startValue, duration]);
+  const [discountType, setDiscountType] = useState(existing?.discount?.type || 'none'); // none | percent | fixed
+  const [discountValue, setDiscountValue] = useState(existing?.discount?.value ? String(existing.discount.value) : '');
+  const [discountReason, setDiscountReason] = useState(existing?.discount?.reason || '');
+
+  const effectiveStart = existing?.start || startValue;
+  const effectiveDate  = existing?.date  || date;
+  const effectiveStartLabel = startLabel || effectiveStart;
+
+  const endValue = useMemo(() => addMinutes(effectiveStart, duration.minutes), [effectiveStart, duration]);
   const reservedIntervals = useMemo(
-    () => intervalsForRange(startValue, duration.minutes / 60),
-    [startValue, duration]
+    () => intervalsForRange(effectiveStart, duration.minutes / 60),
+    [effectiveStart, duration]
   );
-  const existingBooked = useMemo(() => bookedIntervalsFor(table.id, date), [table.id, date]);
+
+  // when editing, exclude this booking's own intervals from conflict detection
+  const existingBooked = useMemo(() => {
+    const set = bookedIntervalsFor(table.id, effectiveDate);
+    if (editing && existing) {
+      existing.intervals?.forEach((iv) => set.delete(iv));
+    }
+    return set;
+  }, [table.id, effectiveDate, editing, existing]);
   const conflict = reservedIntervals.some((iv) => existingBooked.has(iv));
 
   const rate = isMember ? table.memberRate : table.nonMemberRate;
-  const total = Math.round((rate * duration.minutes) / 60);
+  const subtotal = Math.round((rate * duration.minutes) / 60);
+  const discountAmount =
+    discountType === 'percent'
+      ? Math.round(subtotal * (Number(discountValue || 0) / 100))
+      : discountType === 'fixed'
+      ? Number(discountValue || 0)
+      : 0;
+  const total = Math.max(0, subtotal - discountAmount);
 
-  const dateLabel = new Date(date).toLocaleDateString('en-US', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
+  const dateLabel = new Date(effectiveDate).toLocaleDateString('en-US', {
+    weekday: 'long', day: 'numeric', month: 'long',
   });
+
+  const toggleMember = (m) => {
+    setMembers((curr) => {
+      const exists = curr.find((x) => x.id === m.id);
+      if (exists) return curr.filter((x) => x.id !== m.id);
+      if (curr.length >= MAX_MEMBERS) {
+        Alert.alert('Limit reached', `You can add up to ${MAX_MEMBERS} members per booking.`);
+        return curr;
+      }
+      return [...curr, m];
+    });
+  };
 
   const handleConfirm = () => {
     if (conflict) {
       return Alert.alert('Conflict', 'Selected duration overlaps an existing booking. Pick a shorter duration.');
     }
+    if (isMember && members.length === 0) {
+      return Alert.alert('No member selected', 'Pick at least one member for this booking.');
+    }
     if (!isMember && !guestName) {
       return Alert.alert('Missing info', 'Please enter the guest name.');
     }
-    addBooking({
+
+    const discountPayload =
+      discountType !== 'none' && Number(discountValue) > 0
+        ? { type: discountType, value: Number(discountValue), amount: discountAmount, reason: discountReason || null }
+        : null;
+
+    const payload = {
       tableId: table.id,
       tableNumber: table.number,
-      date,
-      start: startValue,
+      date: effectiveDate,
+      start: effectiveStart,
       end: endValue,
       intervals: reservedIntervals,
       isMember,
-      memberId: isMember ? member.id : null,
-      memberName: isMember ? member.name : guestName,
-      memberType: isMember ? member.type : 'Guest',
+      members: isMember ? members.map((m) => ({ id: m.id, name: m.name, type: m.type })) : [],
+      memberType: isMember ? members[0]?.type : 'Guest',
+      memberName: isMember ? members.map((m) => m.name).join(', ') : guestName,
+      memberId: isMember ? members[0]?.id : null,
+      subtotal,
+      discount: discountPayload,
       amount: total,
-    });
-    Alert.alert(
-      'Booking Confirmed',
-      `Table #${table.number} booked ${dateLabel} from ${startValue} to ${endValue} for Rs. ${total.toLocaleString()}.`,
-      [{ text: 'OK', onPress: () => navigation.goBack() }]
-    );
+    };
+
+    if (editing) {
+      updateBooking(bookingId, payload);
+      Alert.alert('Booking Updated', `Table #${table.number} updated for ${dateLabel}.`, [
+        { text: 'OK', onPress: () => navigation.goBack() },
+      ]);
+    } else {
+      addBooking(payload);
+      Alert.alert(
+        'Booking Confirmed',
+        `Table #${table.number} booked ${dateLabel} from ${effectiveStart} to ${endValue} for Rs. ${total.toLocaleString()}.`,
+        [{ text: 'OK', onPress: () => navigation.goBack() }]
+      );
+    }
   };
 
   return (
     <View style={styles.root}>
       <ScreenHeader
-        title="Complete Booking"
+        title={editing ? 'Amend Booking' : 'Complete Booking'}
         subtitle={`Table #${table.number} · ${table.type}`}
         onBack={() => navigation.goBack()}
         variant="gradient"
@@ -121,7 +190,7 @@ const BookingFormScreen = ({ navigation, route }) => {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.summaryLabel}>Start Time</Text>
-                <Text style={styles.summaryValue}>{startLabel} ({startValue})</Text>
+                <Text style={styles.summaryValue}>{effectiveStartLabel} ({effectiveStart})</Text>
               </View>
               <View style={styles.lockedTag}>
                 <Ionicons name="lock-closed" size={10} color={colors.success} />
@@ -141,9 +210,7 @@ const BookingFormScreen = ({ navigation, route }) => {
                 <Ionicons name="diamond" size={16} color={isMember ? colors.white : colors.primary} />
                 <View>
                   <Text style={[styles.toggleTitle, isMember && { color: colors.white }]}>Member</Text>
-                  <Text style={[styles.toggleSub, isMember && { color: 'rgba(255,255,255,0.85)' }]}>
-                    Rs. {table.memberRate}/hr
-                  </Text>
+                  <Text style={[styles.toggleSub, isMember && { color: 'rgba(255,255,255,0.85)' }]}>Rs. {table.memberRate}/hr</Text>
                 </View>
               </Pressable>
               <Pressable
@@ -153,40 +220,54 @@ const BookingFormScreen = ({ navigation, route }) => {
                 <Ionicons name="person" size={16} color={!isMember ? colors.white : colors.text} />
                 <View>
                   <Text style={[styles.toggleTitle, !isMember && { color: colors.white }]}>Non-Member</Text>
-                  <Text style={[styles.toggleSub, !isMember && { color: 'rgba(255,255,255,0.85)' }]}>
-                    Rs. {table.nonMemberRate}/hr
-                  </Text>
+                  <Text style={[styles.toggleSub, !isMember && { color: 'rgba(255,255,255,0.85)' }]}>Rs. {table.nonMemberRate}/hr</Text>
                 </View>
               </Pressable>
             </View>
           </View>
 
-          {/* Member picker or guest fields */}
+          {/* Member multi-select OR guest fields */}
           {isMember ? (
             <View style={styles.section}>
-              <Text style={styles.sectionLabel}>Select Member</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm }}>
-                {mockMemberships.map((m) => {
-                  const active = member?.id === m.id;
-                  return (
-                    <Pressable
-                      key={m.id}
-                      onPress={() => setMember(m)}
-                      style={[styles.memberChip, active && styles.memberChipActive]}
-                    >
-                      <View style={[styles.memberAvatar, active && { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
-                        <Text style={[styles.memberInit, active && { color: colors.white }]}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionLabel}>Members on this booking</Text>
+                <View style={styles.maxPill}>
+                  <Text style={styles.maxPillText}>{members.length}/{MAX_MEMBERS}</Text>
+                </View>
+              </View>
+
+              {/* Selected chips */}
+              {members.length > 0 ? (
+                <View style={styles.selectedRow}>
+                  {members.map((m) => (
+                    <View key={m.id} style={styles.selectedChip}>
+                      <View style={styles.selectedAvatar}>
+                        <Text style={styles.selectedAvatarText}>
                           {m.name.split(' ').map((s) => s[0]).slice(0, 2).join('')}
                         </Text>
                       </View>
-                      <View>
-                        <Text style={[styles.memberName, active && { color: colors.white }]}>{m.name}</Text>
-                        <Text style={[styles.memberId, active && { color: 'rgba(255,255,255,0.7)' }]}>{m.id}</Text>
-                      </View>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
+                      <Text style={styles.selectedName} numberOfLines={1}>{m.name}</Text>
+                      <TouchableOpacity onPress={() => toggleMember(m)} hitSlop={8}>
+                        <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.helpText}>No members selected yet.</Text>
+              )}
+
+              <TouchableOpacity
+                style={styles.openListBtn}
+                activeOpacity={0.85}
+                onPress={() => setMemberPickerOpen(true)}
+              >
+                <Ionicons name="people-outline" size={16} color={colors.primary} />
+                <Text style={styles.openListText}>
+                  {members.length === 0 ? 'Select members' : 'Add / change members'}
+                </Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.primary} />
+              </TouchableOpacity>
             </View>
           ) : (
             <View style={styles.section}>
@@ -206,9 +287,7 @@ const BookingFormScreen = ({ navigation, route }) => {
                   onPress={() => setDuration(d)}
                   style={[styles.durBtn, duration.label === d.label && styles.durBtnActive]}
                 >
-                  <Text style={[styles.durText, duration.label === d.label && { color: colors.white }]}>
-                    {d.label}
-                  </Text>
+                  <Text style={[styles.durText, duration.label === d.label && { color: colors.white }]}>{d.label}</Text>
                 </Pressable>
               ))}
             </View>
@@ -221,11 +300,71 @@ const BookingFormScreen = ({ navigation, route }) => {
             {conflict ? (
               <View style={styles.conflictBanner}>
                 <Ionicons name="warning" size={14} color={colors.error} />
-                <Text style={styles.conflictText}>
-                  This duration overlaps another booking. Try a shorter slot.
-                </Text>
+                <Text style={styles.conflictText}>This duration overlaps another booking.</Text>
               </View>
             ) : null}
+          </View>
+
+          {/* Discount */}
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>Discount (optional)</Text>
+
+            <View style={styles.discTypeRow}>
+              {[
+                { value: 'none',    label: 'None',  icon: 'ban-outline' },
+                { value: 'percent', label: '%',     icon: 'pricetag' },
+                { value: 'fixed',   label: 'Rs.',   icon: 'cash' },
+              ].map((t) => (
+                <Pressable
+                  key={t.value}
+                  onPress={() => setDiscountType(t.value)}
+                  style={[styles.discTypeBtn, discountType === t.value && styles.discTypeBtnActive]}
+                >
+                  <Ionicons name={t.icon} size={14} color={discountType === t.value ? colors.white : colors.text} />
+                  <Text style={[styles.discTypeText, discountType === t.value && { color: colors.white }]}>{t.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            {discountType !== 'none' && (
+              <>
+                <Text style={styles.fieldLabel}>
+                  {discountType === 'percent' ? 'Percent off (%)' : 'Discount amount (Rs.)'}
+                </Text>
+                <View style={styles.amountRow}>
+                  <Text style={styles.currency}>{discountType === 'percent' ? '%' : 'Rs.'}</Text>
+                  <TextInput
+                    value={discountValue}
+                    onChangeText={setDiscountValue}
+                    placeholder="0"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="number-pad"
+                    style={styles.amountInput}
+                  />
+                </View>
+
+                <Text style={styles.fieldLabel}>Reason for discount</Text>
+                <TextInput
+                  value={discountReason}
+                  onChangeText={setDiscountReason}
+                  placeholder="e.g. happy hour, regular customer, manager comp"
+                  placeholderTextColor={colors.textMuted}
+                  multiline
+                  style={styles.descInput}
+                />
+
+                <View style={styles.priceBreakdown}>
+                  <BreakRow label="Subtotal" value={`Rs. ${subtotal.toLocaleString()}`} />
+                  <BreakRow
+                    label={`Discount${discountType === 'percent' ? ` (${discountValue || 0}%)` : ''}`}
+                    value={`- Rs. ${discountAmount.toLocaleString()}`}
+                    color={colors.error}
+                  />
+                  <View style={styles.breakDivider} />
+                  <BreakRow label="Total" value={`Rs. ${total.toLocaleString()}`} bold />
+                </View>
+              </>
+            )}
           </View>
         </ScrollView>
 
@@ -236,10 +375,77 @@ const BookingFormScreen = ({ navigation, route }) => {
             <Text style={styles.totalValue}>Rs. {total.toLocaleString()}</Text>
           </View>
           <View style={{ flex: 1, marginLeft: spacing.md }}>
-            <GradientButton label="Confirm Booking" icon="checkmark" onPress={handleConfirm} disabled={conflict} />
+            <GradientButton
+              label={editing ? 'Save Changes' : 'Confirm Booking'}
+              icon="checkmark"
+              onPress={handleConfirm}
+              disabled={conflict}
+            />
           </View>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Member picker modal */}
+      <Modal
+        visible={memberPickerOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setMemberPickerOpen(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { paddingBottom: insets.bottom + spacing.md }]}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHead}>
+              <View>
+                <Text style={styles.modalTitle}>Select members</Text>
+                <Text style={styles.modalSub}>Up to {MAX_MEMBERS}. Tick to add or remove.</Text>
+              </View>
+              <TouchableOpacity onPress={() => setMemberPickerOpen(false)} hitSlop={10}>
+                <Ionicons name="close-circle" size={24} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
+              {mockMemberships.map((m) => {
+                const selected = !!members.find((x) => x.id === m.id);
+                return (
+                  <TouchableOpacity
+                    key={m.id}
+                    activeOpacity={0.85}
+                    onPress={() => toggleMember(m)}
+                    style={[styles.memberRow, selected && styles.memberRowActive]}
+                  >
+                    {m.photo ? (
+                      <Image source={typeof m.photo === 'string' ? { uri: m.photo } : m.photo} style={styles.memberPhoto} />
+                    ) : (
+                      <View style={[styles.memberPhoto, styles.memberPhotoFallback]}>
+                        <Text style={styles.memberPhotoInit}>
+                          {m.name.split(' ').map((s) => s[0]).slice(0, 2).join('')}
+                        </Text>
+                      </View>
+                    )}
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.memberRowName}>{m.name}</Text>
+                      <Text style={styles.memberRowMeta}>{m.id} · {m.type}</Text>
+                    </View>
+                    <View style={[styles.tick, selected && styles.tickActive]}>
+                      {selected ? <Ionicons name="checkmark" size={14} color={colors.white} /> : null}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            <View style={{ marginTop: spacing.md }}>
+              <GradientButton
+                label={`Done — ${members.length} selected`}
+                icon="checkmark"
+                onPress={() => setMemberPickerOpen(false)}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -251,6 +457,13 @@ const Field = ({ label, icon, ...rest }) => (
       <Ionicons name={icon} size={18} color={colors.textLight} />
       <TextInput {...rest} placeholderTextColor={colors.textMuted} style={styles.input} />
     </View>
+  </View>
+);
+
+const BreakRow = ({ label, value, color, bold }) => (
+  <View style={styles.breakRow}>
+    <Text style={[styles.breakLabel, bold && { color: colors.text, fontWeight: '800' }]}>{label}</Text>
+    <Text style={[styles.breakValue, color && { color }, bold && { ...typography.h4, color: colors.primary }]}>{value}</Text>
   </View>
 );
 
@@ -267,11 +480,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     ...shadows.sm,
   },
-  summaryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-  },
+  summaryRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   summaryIcon: {
     width: 36, height: 36, borderRadius: 18,
     backgroundColor: colors.primarySoft,
@@ -281,12 +490,9 @@ const styles = StyleSheet.create({
   summaryValue: { ...typography.body, color: colors.text, fontWeight: '700', marginTop: 2 },
   summaryDivider: { height: 1, backgroundColor: colors.border, marginVertical: spacing.md },
   lockedTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
+    flexDirection: 'row', alignItems: 'center', gap: 4,
     backgroundColor: colors.successSoft,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
+    paddingHorizontal: spacing.sm, paddingVertical: 3,
     borderRadius: borderRadius.round,
   },
   lockedText: { fontSize: 10, color: colors.success, fontWeight: '800' },
@@ -301,109 +507,175 @@ const styles = StyleSheet.create({
     ...shadows.sm,
   },
   sectionLabel: { ...typography.label, color: colors.primaryDark, marginBottom: spacing.md },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md },
+  maxPill: {
+    backgroundColor: colors.primarySoft,
+    paddingHorizontal: 10, paddingVertical: 3,
+    borderRadius: borderRadius.round,
+  },
+  maxPillText: { fontSize: 11, color: colors.primaryDark, fontWeight: '800' },
 
   toggleRow: { flexDirection: 'row', gap: spacing.sm },
   toggleBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
+    flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.md,
     backgroundColor: colors.surfaceAlt,
-    borderWidth: 1.5,
-    borderColor: colors.border,
+    borderWidth: 1.5, borderColor: colors.border,
     borderRadius: borderRadius.md,
   },
-  toggleBtnActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
+  toggleBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   toggleTitle: { ...typography.bodySmall, color: colors.text, fontWeight: '800' },
   toggleSub: { fontSize: 11, color: colors.textLight, marginTop: 1 },
 
-  memberChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.surfaceAlt,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.sm,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-  },
-  memberChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  memberAvatar: {
-    width: 30, height: 30, borderRadius: 15,
+  selectedRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.md },
+  selectedChip: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     backgroundColor: colors.primarySoft,
+    paddingHorizontal: spacing.sm + 2, paddingVertical: spacing.sm,
+    borderRadius: borderRadius.round,
+    borderWidth: 1, borderColor: colors.primary,
+  },
+  selectedAvatar: {
+    width: 24, height: 24, borderRadius: 12,
+    backgroundColor: colors.primary,
     alignItems: 'center', justifyContent: 'center',
   },
-  memberInit: { ...typography.caption, color: colors.primaryDark, fontWeight: '800' },
-  memberName: { ...typography.bodySmall, color: colors.text, fontWeight: '700' },
-  memberId: { fontSize: 10, color: colors.textLight, fontWeight: '600' },
+  selectedAvatarText: { fontSize: 10, color: colors.white, fontWeight: '800' },
+  selectedName: { ...typography.bodySmall, color: colors.text, fontWeight: '700', maxWidth: 120 },
+  helpText: { ...typography.caption, color: colors.textLight, marginBottom: spacing.md, textTransform: 'none', letterSpacing: 0 },
+  openListBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.md,
+    borderRadius: borderRadius.md,
+    borderWidth: 1.5, borderColor: colors.primary,
+    backgroundColor: colors.surface,
+  },
+  openListText: { flex: 1, ...typography.bodySmall, color: colors.primary, fontWeight: '700' },
 
   field: { marginBottom: spacing.md },
-  fieldLabel: { ...typography.caption, color: colors.textLight, fontWeight: '700', marginBottom: spacing.xs },
+  fieldLabel: {
+    ...typography.caption, color: colors.textLight, fontWeight: '700',
+    marginBottom: spacing.xs, marginTop: spacing.sm,
+  },
   fieldRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    borderWidth: 1.5,
-    borderColor: colors.border,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    borderWidth: 1.5, borderColor: colors.border,
     backgroundColor: colors.surfaceAlt,
-    paddingHorizontal: spacing.md,
-    height: 50,
+    paddingHorizontal: spacing.md, height: 50,
     borderRadius: borderRadius.md,
   },
   input: { flex: 1, ...typography.body, color: colors.text, paddingVertical: 0 },
 
   durRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   durBtn: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2,
     borderRadius: borderRadius.round,
     backgroundColor: colors.surfaceAlt,
-    borderWidth: 1.5,
-    borderColor: colors.border,
+    borderWidth: 1.5, borderColor: colors.border,
   },
   durBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   durText: { ...typography.bodySmall, color: colors.text, fontWeight: '700' },
   endHint: {
-    marginTop: spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: colors.primarySoft,
-    borderRadius: borderRadius.md,
+    marginTop: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    backgroundColor: colors.primarySoft, borderRadius: borderRadius.md,
   },
   endHintText: { ...typography.bodySmall, color: colors.text, flex: 1 },
   conflictBanner: {
-    marginTop: spacing.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: colors.errorSoft,
-    borderRadius: borderRadius.md,
+    marginTop: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    backgroundColor: colors.errorSoft, borderRadius: borderRadius.md,
   },
   conflictText: { ...typography.bodySmall, color: colors.error, flex: 1 },
 
+  discTypeRow: { flexDirection: 'row', gap: spacing.sm },
+  discTypeBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: spacing.sm + 2,
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 1.5, borderColor: colors.border,
+    borderRadius: borderRadius.md,
+  },
+  discTypeBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  discTypeText: { ...typography.bodySmall, color: colors.text, fontWeight: '800' },
+  amountRow: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: colors.primarySoft,
+    paddingHorizontal: spacing.lg, height: 56,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1.5, borderColor: colors.primary,
+  },
+  currency: { ...typography.h4, color: colors.primary, fontWeight: '800', marginRight: spacing.sm },
+  amountInput: {
+    flex: 1, fontSize: 22, fontWeight: '800',
+    color: colors.text, paddingVertical: 0,
+  },
+  descInput: {
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: borderRadius.md,
+    borderWidth: 1.5, borderColor: colors.border,
+    padding: spacing.md, minHeight: 70,
+    textAlignVertical: 'top',
+    ...typography.body, color: colors.text,
+  },
+  priceBreakdown: {
+    marginTop: spacing.md,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+  },
+  breakRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
+  breakLabel: { ...typography.bodySmall, color: colors.textLight, fontWeight: '700' },
+  breakValue: { ...typography.bodySmall, color: colors.text, fontWeight: '800' },
+  breakDivider: { height: 1, backgroundColor: colors.border, marginVertical: spacing.xs },
+
   footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: spacing.lg, paddingTop: spacing.md,
     backgroundColor: colors.surface,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopWidth: 1, borderTopColor: colors.border,
   },
   totalBlock: {},
   totalLabel: { fontSize: 10, color: colors.textLight, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
   totalValue: { ...typography.h2, color: colors.primary, marginTop: 2 },
+
+  // Member picker modal
+  modalOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'flex-end' },
+  modalCard: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: borderRadius.xxl,
+    borderTopRightRadius: borderRadius.xxl,
+    padding: spacing.lg, paddingTop: spacing.sm,
+  },
+  modalHandle: {
+    width: 40, height: 4, borderRadius: 2,
+    backgroundColor: colors.divider,
+    alignSelf: 'center',
+    marginBottom: spacing.md,
+  },
+  modalHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: spacing.md },
+  modalTitle: { ...typography.h3, color: colors.text },
+  modalSub: { ...typography.bodySmall, color: colors.textLight, marginTop: 2 },
+  memberRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1.5, borderColor: 'transparent',
+    marginBottom: spacing.sm,
+  },
+  memberRowActive: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  memberPhoto: { width: 36, height: 36, borderRadius: 18 },
+  memberPhotoFallback: { backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  memberPhotoInit: { ...typography.caption, color: colors.primaryDark, fontWeight: '800' },
+  memberRowName: { ...typography.bodySmall, color: colors.text, fontWeight: '700' },
+  memberRowMeta: { ...typography.caption, color: colors.textLight, marginTop: 2, textTransform: 'none', letterSpacing: 0 },
+  tick: {
+    width: 24, height: 24, borderRadius: 12,
+    borderWidth: 2, borderColor: colors.border,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  tickActive: { backgroundColor: colors.primary, borderColor: colors.primary },
 });
 
 export default BookingFormScreen;

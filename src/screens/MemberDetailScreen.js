@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -14,6 +15,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { captureRef } from 'react-native-view-shot';
+import * as Sharing from 'expo-sharing';
 import { colors, typography, spacing, borderRadius, shadows } from '../styles/theme';
 import { mockMemberships, mockBookings, membershipDurations } from '../data/mockData';
 import MembershipVirtualCard from '../components/MembershipVirtualCard';
@@ -29,6 +32,72 @@ const MemberDetailScreen = ({ navigation, route }) => {
   const [renewOpen, setRenewOpen] = useState(false);
   const [renewDuration, setRenewDuration] = useState(membershipDurations[3]);
   const [renewPrice, setRenewPrice] = useState('');
+  const [sharing, setSharing] = useState(false);
+
+  const cardRef = useRef(null);
+
+  const captureCard = async () => {
+    return captureRef(cardRef, {
+      format: 'png',
+      quality: 1.0,
+      result: 'tmpfile',
+    });
+  };
+
+  const shareMessage = () =>
+    `Hello ${member.name}, here is your Shots Members Club card.\n\nMember ID: ${member.id}\nType: ${member.type}\nValid until: ${member.expiryDate}\n\nShow this card or have it scanned at the entrance.`;
+
+  const handleWhatsApp = async () => {
+    try {
+      setSharing(true);
+      const uri = await captureCard();
+      const available = await Sharing.isAvailableAsync();
+      if (!available) {
+        // Fallback: open a text-only WhatsApp chat
+        const num = (member.phone || '').replace(/[^\d]/g, '');
+        if (!num) throw new Error('Sharing not supported and no phone on file.');
+        await Linking.openURL(`whatsapp://send?phone=${num}&text=${encodeURIComponent(shareMessage())}`);
+        return;
+      }
+      // Native share sheet — user picks WhatsApp and the image is attached.
+      await Sharing.shareAsync(uri, {
+        mimeType: 'image/png',
+        dialogTitle: `Send ${member.name}'s membership card`,
+        UTI: 'public.png',
+      });
+    } catch (e) {
+      Alert.alert('Could not share card', e?.message || 'Try again in a moment.');
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  const handleEmail = async () => {
+    if (!member.email) {
+      return Alert.alert('No email', 'This member has no email on file.');
+    }
+    try {
+      setSharing(true);
+      const uri = await captureCard();
+      const available = await Sharing.isAvailableAsync();
+      if (available) {
+        // Share sheet — user picks Gmail/Mail and the image is attached.
+        await Sharing.shareAsync(uri, {
+          mimeType: 'image/png',
+          dialogTitle: `Email ${member.name}'s membership card`,
+          UTI: 'public.png',
+        });
+      } else {
+        // Fallback: plain mailto (no attachment possible via mailto)
+        const url = `mailto:${member.email}?subject=${encodeURIComponent('Your Shots Members Club card')}&body=${encodeURIComponent(shareMessage())}`;
+        await Linking.openURL(url);
+      }
+    } catch (e) {
+      Alert.alert('Could not send card', e?.message || 'Try again in a moment.');
+    } finally {
+      setSharing(false);
+    }
+  };
 
   const confirmRenew = () => {
     Alert.alert(
@@ -66,8 +135,30 @@ const MemberDetailScreen = ({ navigation, route }) => {
         contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 90 }]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.cardWrap}>
+        <View ref={cardRef} collapsable={false} style={styles.cardWrap}>
           <MembershipVirtualCard member={member} />
+        </View>
+
+        {/* Share card */}
+        <View style={styles.shareRow}>
+          <TouchableOpacity
+            onPress={handleWhatsApp}
+            disabled={sharing}
+            style={[styles.shareBtn, styles.shareWa, sharing && styles.shareBtnDisabled]}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
+            <Text style={styles.shareText}>{sharing ? 'Preparing…' : 'Send via WhatsApp'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleEmail}
+            disabled={sharing}
+            style={[styles.shareBtn, styles.shareMail, sharing && styles.shareBtnDisabled]}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="mail" size={18} color={colors.primary} />
+            <Text style={styles.shareText}>{sharing ? 'Preparing…' : 'Send via Email'}</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.statRow}>
@@ -210,7 +301,28 @@ const InfoRow = ({ icon, label, value, isLast }) => (
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background },
   scroll: { padding: spacing.lg },
-  cardWrap: { marginBottom: spacing.lg },
+  cardWrap: { marginBottom: spacing.md },
+  shareRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  shareBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1.5,
+    backgroundColor: colors.surface,
+    ...shadows.xs,
+  },
+  shareWa: { borderColor: '#25D366' },
+  shareMail: { borderColor: colors.primary },
+  shareText: { ...typography.bodySmall, color: colors.text, fontWeight: '700' },
+  shareBtnDisabled: { opacity: 0.55 },
   statRow: {
     flexDirection: 'row',
     gap: spacing.sm,

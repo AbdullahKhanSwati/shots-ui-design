@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,54 +11,60 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, gradients, typography, spacing, borderRadius, shadows } from '../styles/theme';
-import { mockFinance } from '../data/mockData';
+import {
+  getMTDFinance, getMonthFinance, previousMonths, dateKey,
+} from '../data/mockData';
 import SearchBar from '../components/SearchBar';
 import FilterChips from '../components/FilterChips';
 
-const PERIODS = [
-  { value: 'Today', label: 'Today', icon: 'today' },
-  { value: 'Week', label: 'Week', icon: 'calendar' },
-  { value: 'Month', label: 'Month', icon: 'calendar-outline' },
-  { value: 'All', label: 'All Time', icon: 'infinite' },
-];
 const TYPES = [
   { value: 'All', label: 'All', icon: 'apps' },
-  { value: 'In', label: 'Income', icon: 'trending-up' },
+  { value: 'In',  label: 'Income', icon: 'trending-up' },
   { value: 'Out', label: 'Expense', icon: 'trending-down' },
 ];
 
-const TODAY = '2026-05-13';
-
 const FinanceScreen = ({ navigation }) => {
   const insets = useSafeAreaInsets();
-  const [period, setPeriod] = useState('Today');
+  const months = useMemo(() => previousMonths(12), []);
+  const [monthIndex, setMonthIndex] = useState(0); // 0 = current month
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [type, setType] = useState('All');
   const [query, setQuery] = useState('');
 
+  const selectedMonth = months[monthIndex];
+  const isCurrentMonth = selectedMonth.isCurrent;
+
   const items = useMemo(() => {
-    return mockFinance.filter((f) => {
-      const matchP = period === 'All' || (period === 'Today' && f.date === TODAY) || true;
+    const list = isCurrentMonth
+      ? getMTDFinance(new Date())
+      : getMonthFinance(selectedMonth.year, selectedMonth.month);
+    return list.filter((f) => {
       const matchT = type === 'All' || f.type === type;
       const q = query.trim().toLowerCase();
       const matchQ = !q || f.category.toLowerCase().includes(q) || f.description.toLowerCase().includes(q);
-      return matchP && matchT && matchQ;
+      return matchT && matchQ;
     });
-  }, [period, type, query]);
+  }, [monthIndex, type, query, isCurrentMonth, selectedMonth]);
 
   const income = items.filter((i) => i.type === 'In').reduce((s, i) => s + i.amount, 0);
   const expense = items.filter((i) => i.type === 'Out').reduce((s, i) => s + i.amount, 0);
   const net = income - expense;
-  const max = Math.max(income, expense, 1);
   const incomeRatio = income / (income + expense || 1);
 
   const grouped = useMemo(() => {
     const map = new Map();
-    items.forEach((it) => {
-      if (!map.has(it.date)) map.set(it.date, []);
-      map.get(it.date).push(it);
-    });
+    items
+      .slice()
+      .sort((a, b) => (a.date < b.date ? 1 : -1))
+      .forEach((it) => {
+        if (!map.has(it.date)) map.set(it.date, []);
+        map.get(it.date).push(it);
+      });
     return Array.from(map.entries());
   }, [items]);
+
+  const headingLabel = isCurrentMonth ? `${selectedMonth.label} · to date` : selectedMonth.label;
+  const todayKey = dateKey(new Date());
 
   return (
     <View style={styles.root}>
@@ -72,8 +79,15 @@ const FinanceScreen = ({ navigation }) => {
           </TouchableOpacity>
         </View>
 
+        {/* Month picker pill */}
+        <TouchableOpacity activeOpacity={0.85} onPress={() => setPickerOpen(true)} style={styles.monthPill}>
+          <Ionicons name="calendar" size={14} color={colors.white} />
+          <Text style={styles.monthPillText}>{headingLabel}</Text>
+          <Ionicons name="chevron-down" size={14} color={colors.white} />
+        </TouchableOpacity>
+
         <View style={styles.netCard}>
-          <Text style={styles.netLabel}>Net Profit · {period}</Text>
+          <Text style={styles.netLabel}>Net Profit · {headingLabel}</Text>
           <Text style={styles.netValue}>Rs. {net.toLocaleString()}</Text>
 
           <View style={styles.bar}>
@@ -102,8 +116,7 @@ const FinanceScreen = ({ navigation }) => {
         <SearchBar value={query} onChangeText={setQuery} placeholder="Search transactions…" />
       </View>
 
-      <View style={styles.filterStack}>
-        <FilterChips label="Period" items={PERIODS} value={period} onChange={setPeriod} compact />
+      <View style={{ paddingTop: spacing.sm }}>
         <FilterChips label="Type" items={TYPES} value={type} onChange={setType} compact />
       </View>
 
@@ -114,13 +127,13 @@ const FinanceScreen = ({ navigation }) => {
         {grouped.length === 0 ? (
           <View style={styles.empty}>
             <Ionicons name="wallet-outline" size={48} color={colors.textMuted} />
-            <Text style={styles.emptyText}>No transactions match</Text>
+            <Text style={styles.emptyText}>No transactions for this period</Text>
           </View>
         ) : (
           grouped.map(([date, list]) => (
             <View key={date} style={{ marginBottom: spacing.md }}>
               <Text style={styles.dateLabel}>
-                {date === TODAY ? 'Today' : new Date(date).toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' })}
+                {date === todayKey ? 'Today' : new Date(date).toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' })}
               </Text>
               {list.map((tx) => (
                 <View key={tx.id} style={styles.txRow}>
@@ -150,11 +163,53 @@ const FinanceScreen = ({ navigation }) => {
       <TouchableOpacity
         style={[styles.fab, { bottom: 24 + insets.bottom }]}
         activeOpacity={0.9}
+        onPress={() => navigation.navigate('Expense')}
       >
         <LinearGradient colors={gradients.brand} style={styles.fabGrad}>
           <Ionicons name="add" size={26} color={colors.white} />
         </LinearGradient>
       </TouchableOpacity>
+
+      {/* Month picker modal */}
+      <Modal visible={pickerOpen} transparent animationType="slide" onRequestClose={() => setPickerOpen(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { paddingBottom: insets.bottom + spacing.md }]}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHead}>
+              <View>
+                <Text style={styles.modalTitle}>Select month</Text>
+                <Text style={styles.modalSub}>Current month is month-to-date.</Text>
+              </View>
+              <TouchableOpacity onPress={() => setPickerOpen(false)} hitSlop={10}>
+                <Ionicons name="close-circle" size={24} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
+              {months.map((m, i) => {
+                const active = i === monthIndex;
+                return (
+                  <TouchableOpacity
+                    key={`${m.year}-${m.month}`}
+                    activeOpacity={0.85}
+                    onPress={() => { setMonthIndex(i); setPickerOpen(false); }}
+                    style={[styles.monthRow, active && styles.monthRowActive]}
+                  >
+                    <View style={[styles.monthIcon, active && { backgroundColor: colors.primary }]}>
+                      <Ionicons name="calendar" size={14} color={active ? colors.white : colors.primary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.monthRowName}>{m.label}</Text>
+                      {m.isCurrent ? <Text style={styles.monthRowMeta}>Current month — to date</Text> : null}
+                    </View>
+                    {active ? <Ionicons name="checkmark-circle" size={20} color={colors.primary} /> : null}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -178,10 +233,8 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 32,
   },
   heroTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.lg,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: spacing.md,
   },
   iconBtn: {
     width: 38, height: 38, borderRadius: borderRadius.md,
@@ -189,95 +242,109 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   heroTitle: { ...typography.h3, color: colors.white },
+  monthPill: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    paddingHorizontal: spacing.md, paddingVertical: 8,
+    borderRadius: borderRadius.round,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.22)',
+    marginBottom: spacing.md,
+  },
+  monthPillText: { ...typography.bodySmall, color: colors.white, fontWeight: '800' },
   netCard: {
     backgroundColor: 'rgba(0,0,0,0.22)',
     borderRadius: borderRadius.xl,
     padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
   },
   netLabel: { ...typography.caption, color: 'rgba(255,255,255,0.7)', fontWeight: '700' },
   netValue: { ...typography.display, color: colors.white, marginTop: 4 },
   bar: {
-    flexDirection: 'row',
-    height: 10,
-    borderRadius: 5,
-    overflow: 'hidden',
-    marginTop: spacing.md,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    flexDirection: 'row', height: 10, borderRadius: 5, overflow: 'hidden',
+    marginTop: spacing.md, backgroundColor: 'rgba(255,255,255,0.1)',
   },
-  barIn: { backgroundColor: colors.success },
+  barIn:  { backgroundColor: colors.success },
   barOut: { backgroundColor: colors.gold },
   barLegend: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.sm },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   legendDot: { width: 8, height: 8, borderRadius: 4 },
   legendText: { fontSize: 11, color: 'rgba(255,255,255,0.85)', fontWeight: '600' },
+
   cards: {
     flexDirection: 'row',
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    gap: spacing.sm,
-    marginTop: -spacing.lg,
+    paddingHorizontal: spacing.lg, paddingTop: spacing.md,
+    gap: spacing.sm, marginTop: -spacing.lg,
   },
   moneyCard: {
     flex: 1,
     backgroundColor: colors.surface,
     padding: spacing.md,
     borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: 1, borderColor: colors.border,
     borderTopWidth: 3,
     ...shadows.md,
   },
-  moneyIcon: {
-    width: 32, height: 32, borderRadius: 16,
-    alignItems: 'center', justifyContent: 'center',
-    marginBottom: 4,
-  },
+  moneyIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
   moneyLabel: { fontSize: 10, color: colors.textLight, fontWeight: '700', letterSpacing: 0.5 },
   moneyValue: { ...typography.h4, color: colors.text, marginTop: 2 },
+
   controls: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
-  filterStack: { paddingTop: spacing.sm, gap: spacing.xs },
   list: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
   empty: { alignItems: 'center', paddingTop: spacing.xxxl, gap: spacing.md },
   emptyText: { ...typography.bodySmall, color: colors.textLight },
-  dateLabel: {
-    ...typography.label,
-    color: colors.textLight,
-    marginBottom: spacing.sm,
-    marginTop: spacing.sm,
-  },
+  dateLabel: { ...typography.label, color: colors.textLight, marginBottom: spacing.sm, marginTop: spacing.sm },
   txRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
     backgroundColor: colors.surface,
-    padding: spacing.md,
-    borderRadius: borderRadius.lg,
+    padding: spacing.md, borderRadius: borderRadius.lg,
     marginBottom: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: 1, borderColor: colors.border,
     ...shadows.xs,
   },
-  txIcon: {
-    width: 40, height: 40, borderRadius: borderRadius.md,
-    alignItems: 'center', justifyContent: 'center',
-  },
+  txIcon: { width: 40, height: 40, borderRadius: borderRadius.md, alignItems: 'center', justifyContent: 'center' },
   txCat: { ...typography.bodySmall, color: colors.text, fontWeight: '700' },
   txDesc: { ...typography.caption, color: colors.textLight, marginTop: 2, textTransform: 'none', letterSpacing: 0 },
   txAmt: { ...typography.bodySmall, fontWeight: '800' },
+
   fab: {
-    position: 'absolute',
-    right: spacing.lg,
-    width: 58, height: 58,
-    borderRadius: 29,
+    position: 'absolute', right: spacing.lg,
+    width: 58, height: 58, borderRadius: 29,
     ...shadows.red,
   },
   fabGrad: {
     width: '100%', height: '100%',
-    borderRadius: 29,
+    borderRadius: 29, alignItems: 'center', justifyContent: 'center',
+  },
+
+  // Modal
+  modalOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'flex-end' },
+  modalCard: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: borderRadius.xxl,
+    borderTopRightRadius: borderRadius.xxl,
+    padding: spacing.lg, paddingTop: spacing.sm,
+  },
+  modalHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.divider, alignSelf: 'center', marginBottom: spacing.md },
+  modalHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: spacing.md },
+  modalTitle: { ...typography.h3, color: colors.text },
+  modalSub: { ...typography.bodySmall, color: colors.textLight, marginTop: 2 },
+  monthRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1.5, borderColor: 'transparent',
+    marginBottom: spacing.sm,
+  },
+  monthRowActive: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  monthIcon: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: colors.primarySoft,
     alignItems: 'center', justifyContent: 'center',
   },
+  monthRowName: { ...typography.bodySmall, color: colors.text, fontWeight: '700' },
+  monthRowMeta: { ...typography.caption, color: colors.textLight, marginTop: 2, textTransform: 'none', letterSpacing: 0 },
 });
 
 export default FinanceScreen;

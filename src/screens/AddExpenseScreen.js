@@ -36,6 +36,13 @@ const AddExpenseScreen = ({ navigation, route }) => {
   );
   const previousTotal = previous.reduce((s, e) => s + e.amount, 0);
 
+  const resetForm = () => {
+    setAmount('');
+    setDescription('');
+    setCategory('Repair');
+    setTableId(initialTableId ?? NO_TABLE);
+  };
+
   const handleSave = () => {
     if (!amount || !description) {
       return Alert.alert('Missing info', 'Amount and description are required.');
@@ -47,7 +54,16 @@ const AddExpenseScreen = ({ navigation, route }) => {
     Alert.alert(
       'Expense Saved',
       `Rs. ${Number(amount).toLocaleString()} logged as ${category} for ${target}.`,
-      [{ text: 'OK', onPress: () => navigation.goBack() }]
+      [
+        {
+          text: 'OK',
+          onPress: () => {
+            resetForm();
+            // Used as a tab — go back to Dashboard instead of stack-back
+            navigation.navigate?.('Dashboard');
+          },
+        },
+      ]
     );
   };
 
@@ -56,7 +72,7 @@ const AddExpenseScreen = ({ navigation, route }) => {
       <ScreenHeader
         title="Add Expense"
         subtitle="Log a new cost"
-        onBack={() => navigation.goBack()}
+        onMenu={() => navigation.openDrawer?.()}
         variant="gradient"
       />
 

@@ -1,12 +1,13 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
+  Alert,
   Image,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
-  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,9 +18,11 @@ import {
 } from '../styles/theme';
 import {
   mockTables, mockBookings,
-  buildIntervals, nextSevenDays, dateKey, bookedIntervalsFor, tableFreeIn,
+  buildIntervals, nextSevenDays, dateKey, bookedIntervalsFor, findBookingByInterval,
+  removeBooking, tableFreeIn,
 } from '../data/mockData';
 import ScreenHeader from '../components/ScreenHeader';
+import GradientButton from '../components/GradientButton';
 
 const TableDetailScreen = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
@@ -28,15 +31,10 @@ const TableDetailScreen = ({ navigation, route }) => {
   const [table, setTable] = useState(seed);
 
   const [selectedDate, setSelectedDate] = useState(new Date());
-  // re-render trigger when a new booking is added
   const [tick, setTick] = useState(0);
+  const [bookingModal, setBookingModal] = useState(null); // { booking } | null
 
-  // refresh when screen comes back into focus (e.g. after booking)
-  useFocusEffect(
-    useCallback(() => {
-      setTick((t) => t + 1);
-    }, [])
-  );
+  useFocusEffect(useCallback(() => { setTick((t) => t + 1); }, []));
 
   const dates = useMemo(() => nextSevenDays(), []);
   const intervals = useMemo(
@@ -63,15 +61,8 @@ const TableDetailScreen = ({ navigation, route }) => {
           text: 'Mark Available',
           style: 'destructive',
           onPress: () => {
-            setTable((t) => ({
-              ...t,
-              status: 'Available',
-              occupiedUntil: null,
-              occupiedBy: null,
-            }));
-            const active = mockBookings.find(
-              (b) => b.tableId === table.id && b.status === 'Active'
-            );
+            setTable((t) => ({ ...t, status: 'Available', occupiedUntil: null, occupiedBy: null }));
+            const active = mockBookings.find((b) => b.tableId === table.id && b.status === 'Active');
             if (active) {
               active.status = 'Completed';
               active.endedEarly = true;
@@ -85,7 +76,11 @@ const TableDetailScreen = ({ navigation, route }) => {
   };
 
   const onPickSlot = (interval) => {
-    if (booked.has(interval.value)) return;
+    if (booked.has(interval.value)) {
+      const b = findBookingByInterval(table.id, selectedDate, interval.value);
+      if (b) setBookingModal({ booking: b });
+      return;
+    }
     if (isToday && interval.value < nowValue) return;
     navigation.navigate('BookingForm', {
       tableId: table.id,
@@ -93,6 +88,34 @@ const TableDetailScreen = ({ navigation, route }) => {
       startValue: interval.value,
       startLabel: interval.label,
     });
+  };
+
+  const handleAmend = () => {
+    const b = bookingModal?.booking;
+    if (!b) return;
+    setBookingModal(null);
+    navigation.navigate('BookingForm', { tableId: table.id, bookingId: b.id });
+  };
+
+  const handleCancelBooking = () => {
+    const b = bookingModal?.booking;
+    if (!b) return;
+    Alert.alert(
+      'Cancel booking?',
+      `This will free up ${b.start}–${b.end} on Table #${table.number}. This cannot be undone.`,
+      [
+        { text: 'Keep booking', style: 'cancel' },
+        {
+          text: 'Cancel booking',
+          style: 'destructive',
+          onPress: () => {
+            removeBooking(b.id);
+            setBookingModal(null);
+            setTick((t) => t + 1);
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -154,28 +177,14 @@ const TableDetailScreen = ({ navigation, route }) => {
 
         {/* Pricing */}
         <View style={styles.priceCard}>
-          <PriceTile
-            icon="diamond"
-            label="Member Rate"
-            value={`Rs. ${table.memberRate}/hr`}
-            color={colors.primary}
-          />
+          <PriceTile icon="diamond" label="Member Rate" value={`Rs. ${table.memberRate}/hr`} color={colors.primary} />
           <View style={styles.priceDivider} />
-          <PriceTile
-            icon="person"
-            label="Non-Member"
-            value={`Rs. ${table.nonMemberRate}/hr`}
-            color={colors.text}
-          />
+          <PriceTile icon="person" label="Non-Member" value={`Rs. ${table.nonMemberRate}/hr`} color={colors.text} />
         </View>
 
         {/* Date selector */}
         <Text style={styles.sectionTitle}>Select a date</Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.datesRow}
-        >
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.datesRow}>
           {dates.map((d) => {
             const active = dateKey(d) === dKey;
             const today = dateKey(d) === dateKey(new Date());
@@ -189,9 +198,7 @@ const TableDetailScreen = ({ navigation, route }) => {
                 <Text style={[styles.dateChipDay, active && styles.dateChipActiveText]}>
                   {today ? 'Today' : d.toLocaleDateString('en-US', { weekday: 'short' })}
                 </Text>
-                <Text style={[styles.dateChipDate, active && styles.dateChipActiveText]}>
-                  {d.getDate()}
-                </Text>
+                <Text style={[styles.dateChipDate, active && styles.dateChipActiveText]}>{d.getDate()}</Text>
                 <Text style={[styles.dateChipMon, active && styles.dateChipActiveText]}>
                   {d.toLocaleDateString('en-US', { month: 'short' })}
                 </Text>
@@ -202,10 +209,8 @@ const TableDetailScreen = ({ navigation, route }) => {
 
         {/* Slot grid */}
         <View style={styles.gridHeader}>
-          <Text style={styles.sectionTitle}>Available start times</Text>
-          <Text style={styles.gridHint}>
-            Open {table.openTime} · Close {table.closeTime}
-          </Text>
+          <Text style={styles.sectionTitle}>Time slots</Text>
+          <Text style={styles.gridHint}>Open {table.openTime} · Close {table.closeTime}</Text>
         </View>
 
         <Legend />
@@ -214,8 +219,8 @@ const TableDetailScreen = ({ navigation, route }) => {
           {intervals.map((iv) => {
             const isBooked = booked.has(iv.value);
             const isPast = isToday && iv.value < nowValue;
-            const disabled = isBooked || isPast;
             const state = isBooked ? 'booked' : isPast ? 'past' : 'free';
+            const disabled = isPast; // booked is now tappable (opens details)
 
             return (
               <TouchableOpacity
@@ -253,6 +258,64 @@ const TableDetailScreen = ({ navigation, route }) => {
           })}
         </View>
       </ScrollView>
+
+      {/* Booked-slot details */}
+      <Modal
+        visible={!!bookingModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setBookingModal(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { paddingBottom: insets.bottom + spacing.md }]}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHead}>
+              <View>
+                <Text style={styles.modalTitle}>Booking details</Text>
+                <Text style={styles.modalSub}>Table #{table.number} · {bookingModal?.booking?.date}</Text>
+              </View>
+              <TouchableOpacity onPress={() => setBookingModal(null)} hitSlop={10}>
+                <Ionicons name="close-circle" size={24} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {bookingModal?.booking && (
+              <>
+                <View style={styles.detailCard}>
+                  <DetailRow icon="time" label="Time" value={`${bookingModal.booking.start} → ${bookingModal.booking.end}`} />
+                  <DetailRow icon="people" label="Players" value={`${bookingModal.booking.members?.length || 1}`} />
+                  <DetailRow icon="person" label="Member(s)" value={bookingModal.booking.memberName} />
+                  <DetailRow icon={bookingModal.booking.isMember ? 'diamond' : 'walk'} label="Type" value={bookingModal.booking.isMember ? 'Member' : 'Guest'} />
+                  <DetailRow icon="cash" label="Total" value={`Rs. ${bookingModal.booking.amount.toLocaleString()}`} />
+                  {bookingModal.booking.discount ? (
+                    <DetailRow
+                      icon="pricetag"
+                      label="Discount"
+                      value={`${bookingModal.booking.discount.type === 'percent' ? bookingModal.booking.discount.value + '%' : 'Rs. ' + bookingModal.booking.discount.value}${bookingModal.booking.discount.reason ? `  ·  ${bookingModal.booking.discount.reason}` : ''}`}
+                    />
+                  ) : null}
+                  <DetailRow
+                    icon="checkmark-circle"
+                    label="Status"
+                    value={bookingModal.booking.status}
+                    valueColor={bookingModal.booking.status === 'Active' ? colors.success : colors.textLight}
+                  />
+                </View>
+
+                <View style={styles.modalActions}>
+                  <TouchableOpacity onPress={handleCancelBooking} style={styles.cancelBtn} activeOpacity={0.85}>
+                    <Ionicons name="trash-outline" size={16} color={colors.error} />
+                    <Text style={styles.cancelBtnText}>Cancel booking</Text>
+                  </TouchableOpacity>
+                  <View style={{ flex: 1 }}>
+                    <GradientButton label="Amend" icon="create-outline" onPress={handleAmend} />
+                  </View>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -260,7 +323,7 @@ const TableDetailScreen = ({ navigation, route }) => {
 const Legend = () => (
   <View style={styles.legend}>
     <LegendItem color={colors.successSoft} border={colors.success} label="Free" />
-    <LegendItem color={colors.errorSoft} border={colors.error} label="Booked" />
+    <LegendItem color={colors.errorSoft} border={colors.error} label="Booked — tap to view" />
     <LegendItem color={colors.surfaceAlt} border={colors.divider} label="Past" />
   </View>
 );
@@ -284,7 +347,17 @@ const PriceTile = ({ icon, label, value, color }) => (
   </View>
 );
 
-const statusBg = (s) => ({ backgroundColor: 'rgba(255,255,255,0.92)' });
+const DetailRow = ({ icon, label, value, valueColor }) => (
+  <View style={styles.dRow}>
+    <View style={styles.dIcon}>
+      <Ionicons name={icon} size={14} color={colors.primary} />
+    </View>
+    <Text style={styles.dLabel}>{label}</Text>
+    <Text style={[styles.dValue, valueColor && { color: valueColor }]} numberOfLines={2}>{value}</Text>
+  </View>
+);
+
+const statusBg = () => ({ backgroundColor: 'rgba(255,255,255,0.92)' });
 const statusDot = (s) =>
   s === 'Available' ? colors.success : s === 'Occupied' ? colors.primary : colors.warning;
 
@@ -297,95 +370,43 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background },
   scroll: { padding: spacing.lg },
 
-  imageWrap: {
-    borderRadius: borderRadius.xl,
-    overflow: 'hidden',
-    marginBottom: spacing.lg,
-    ...shadows.md,
-  },
-  image: {
-    width: '100%',
-    height: 180,
-  },
-  imageFallback: {
-    height: 180,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  imageDecor1: {
-    position: 'absolute',
-    top: -40, right: -30,
-    width: 160, height: 160, borderRadius: 80,
-    backgroundColor: 'rgba(229,62,62,0.22)',
-  },
-  imageDecor2: {
-    position: 'absolute',
-    bottom: -60, left: -40,
-    width: 180, height: 180, borderRadius: 90,
-    backgroundColor: 'rgba(127,19,24,0.4)',
-  },
-  imageFallbackText: {
-    marginTop: spacing.md,
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1,
-  },
+  imageWrap: { borderRadius: borderRadius.xl, overflow: 'hidden', marginBottom: spacing.lg, ...shadows.md },
+  image: { width: '100%', height: 180 },
+  imageFallback: { height: 180, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  imageDecor1: { position: 'absolute', top: -40, right: -30, width: 160, height: 160, borderRadius: 80, backgroundColor: 'rgba(229,62,62,0.22)' },
+  imageDecor2: { position: 'absolute', bottom: -60, left: -40, width: 180, height: 180, borderRadius: 90, backgroundColor: 'rgba(127,19,24,0.4)' },
+  imageFallbackText: { marginTop: spacing.md, color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: '700', letterSpacing: 1 },
   imageOverlay: {
-    position: 'absolute',
-    top: spacing.md,
-    left: spacing.md,
-    right: spacing.md,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    position: 'absolute', top: spacing.md, left: spacing.md, right: spacing.md,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
   },
   numberBadge: {
     backgroundColor: 'rgba(0,0,0,0.55)',
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
+    paddingHorizontal: spacing.md, paddingVertical: 6,
     borderRadius: borderRadius.round,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)',
   },
-  numberBadgeText: {
-    color: colors.white,
-    fontWeight: '800',
-    fontSize: 14,
-    letterSpacing: 1,
-  },
+  numberBadgeText: { color: colors.white, fontWeight: '800', fontSize: 14, letterSpacing: 1 },
   statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: spacing.md, paddingVertical: 6,
     borderRadius: borderRadius.round,
   },
   statusBadgeDot: { width: 8, height: 8, borderRadius: 4 },
   statusBadgeText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
   occupiedBanner: {
-    position: 'absolute',
-    bottom: spacing.md,
-    left: spacing.md,
-    right: spacing.md,
+    position: 'absolute', bottom: spacing.md, left: spacing.md, right: spacing.md,
     backgroundColor: 'rgba(0,0,0,0.7)',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
     borderRadius: borderRadius.md,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: 'row', alignItems: 'center',
   },
   occupiedLine1: { color: colors.white, fontWeight: '800' },
   occupiedLine2: { color: 'rgba(255,255,255,0.7)', fontSize: 11, marginTop: 2 },
   endBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
+    flexDirection: 'row', alignItems: 'center', gap: 4,
     backgroundColor: colors.primary,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
+    paddingHorizontal: spacing.md, paddingVertical: 6,
     borderRadius: borderRadius.round,
   },
   endBtnText: { color: colors.white, fontWeight: '800', fontSize: 12 },
@@ -395,75 +416,39 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: borderRadius.xl,
     padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: 1, borderColor: colors.border,
     ...shadows.sm,
     marginBottom: spacing.lg,
   },
   priceTile: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  priceIcon: {
-    width: 36, height: 36, borderRadius: 18,
-    alignItems: 'center', justifyContent: 'center',
-  },
+  priceIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   priceLabel: { fontSize: 10, color: colors.textLight, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase' },
   priceValue: { ...typography.h4, marginTop: 2 },
   priceDivider: { width: 1, marginHorizontal: spacing.md, backgroundColor: colors.border },
 
-  sectionTitle: {
-    ...typography.h4,
-    color: colors.text,
-    marginBottom: spacing.sm,
-  },
-  datesRow: {
-    gap: spacing.sm,
-    paddingBottom: spacing.md,
-    paddingRight: 4,
-  },
+  sectionTitle: { ...typography.h4, color: colors.text, marginBottom: spacing.sm },
+  datesRow: { gap: spacing.sm, paddingBottom: spacing.md, paddingRight: 4 },
   dateChip: {
-    width: 60,
-    paddingVertical: spacing.sm,
+    width: 60, paddingVertical: spacing.sm,
     borderRadius: borderRadius.lg,
     backgroundColor: colors.surface,
-    borderWidth: 1.5,
-    borderColor: colors.border,
+    borderWidth: 1.5, borderColor: colors.border,
     alignItems: 'center',
   },
-  dateChipActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-    ...shadows.redSoft,
-  },
+  dateChipActive: { backgroundColor: colors.primary, borderColor: colors.primary, ...shadows.redSoft },
   dateChipDay: { fontSize: 11, color: colors.textLight, fontWeight: '700' },
   dateChipDate: { ...typography.h3, color: colors.text, marginTop: 2 },
   dateChipMon: { fontSize: 10, color: colors.textLight, fontWeight: '700', marginTop: 2 },
   dateChipActiveText: { color: colors.white },
 
-  gridHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    marginBottom: spacing.sm,
-  },
-  gridHint: {
-    fontSize: 11,
-    color: colors.textLight,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  legend: {
-    flexDirection: 'row',
-    gap: spacing.md,
-    marginBottom: spacing.md,
-  },
+  gridHeader: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: spacing.sm },
+  gridHint: { fontSize: 11, color: colors.textLight, fontWeight: '600', marginBottom: 4 },
+  legend: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginBottom: spacing.md },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   legendSwatch: { width: 14, height: 14, borderRadius: 4, borderWidth: 1.5 },
   legendText: { fontSize: 11, color: colors.textLight, fontWeight: '700' },
 
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   slot: {
     width: '23.5%',
     paddingVertical: spacing.sm,
@@ -471,32 +456,57 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1.5,
   },
-  slotFree: {
-    backgroundColor: colors.successSoft,
-    borderColor: colors.success,
-  },
-  slotBooked: {
-    backgroundColor: colors.errorSoft,
-    borderColor: colors.error,
-  },
-  slotPast: {
-    backgroundColor: colors.surfaceAlt,
-    borderColor: colors.divider,
-  },
-  slotText: {
-    ...typography.h4,
-    color: colors.text,
-  },
+  slotFree:   { backgroundColor: colors.successSoft, borderColor: colors.success },
+  slotBooked: { backgroundColor: colors.errorSoft,   borderColor: colors.error },
+  slotPast:   { backgroundColor: colors.surfaceAlt,  borderColor: colors.divider },
+  slotText: { ...typography.h4, color: colors.text },
   slotSub: {
-    fontSize: 10,
-    color: colors.text,
-    fontWeight: '700',
-    marginTop: 2,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
+    fontSize: 10, color: colors.text, fontWeight: '700',
+    marginTop: 2, letterSpacing: 0.5, textTransform: 'uppercase',
   },
   slotBookedText: { color: colors.error },
-  slotPastText: { color: colors.textMuted },
+  slotPastText:   { color: colors.textMuted },
+
+  // Modal
+  modalOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'flex-end' },
+  modalCard: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: borderRadius.xxl,
+    borderTopRightRadius: borderRadius.xxl,
+    padding: spacing.lg, paddingTop: spacing.sm,
+  },
+  modalHandle: {
+    width: 40, height: 4, borderRadius: 2,
+    backgroundColor: colors.divider,
+    alignSelf: 'center',
+    marginBottom: spacing.md,
+  },
+  modalHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: spacing.md },
+  modalTitle: { ...typography.h3, color: colors.text },
+  modalSub: { ...typography.bodySmall, color: colors.textLight, marginTop: 2 },
+  detailCard: {
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    borderWidth: 1, borderColor: colors.border,
+    marginBottom: spacing.md,
+  },
+  dRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
+  dIcon: {
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  dLabel: { ...typography.caption, color: colors.textLight, width: 80, textTransform: 'none', letterSpacing: 0 },
+  dValue: { flex: 1, ...typography.bodySmall, color: colors.text, fontWeight: '700', textAlign: 'right' },
+  modalActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  cancelBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: spacing.md, paddingVertical: 12,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1.5, borderColor: colors.error,
+  },
+  cancelBtnText: { ...typography.bodySmall, color: colors.error, fontWeight: '800' },
 });
 
 export default TableDetailScreen;
