@@ -13,7 +13,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, typography, spacing, borderRadius, shadows } from '../styles/theme';
-import { mockTables, mockFinance, expenseCategories } from '../data/mockData';
+import { expenseCategories } from '../data/mockData';
+import { useShots } from '../store/ShotsStore';
 import GradientButton from '../components/GradientButton';
 import ScreenHeader from '../components/ScreenHeader';
 
@@ -21,20 +22,25 @@ const NO_TABLE = -1;
 
 const AddExpenseScreen = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
+  const { tables, finance, addFinanceEntry } = useShots();
   const initialTableId = route.params?.tableId;
   const [tableId, setTableId] = useState(initialTableId ?? NO_TABLE);
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('Repair');
+  const [saving, setSaving] = useState(false);
 
+  const selectedTable = tables.find((t) => t.id === tableId);
+
+  // Expenses are stored against a table's NUMBER (transactions.table_ref).
   const previous = useMemo(
     () =>
-      mockFinance.filter(
-        (e) => e.type === 'Out' && (tableId === NO_TABLE ? !e.table : e.table === tableId)
+      finance.filter(
+        (e) => e.type === 'Out' && (tableId === NO_TABLE ? !e.table : e.table === selectedTable?.number)
       ),
-    [tableId]
+    [finance, tableId, selectedTable]
   );
-  const previousTotal = previous.reduce((s, e) => s + e.amount, 0);
+  const previousTotal = previous.reduce((s, e) => s + (e.amount || 0), 0);
 
   const resetForm = () => {
     setAmount('');
@@ -43,28 +49,40 @@ const AddExpenseScreen = ({ navigation, route }) => {
     setTableId(initialTableId ?? NO_TABLE);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!amount || !description) {
       return Alert.alert('Missing info', 'Amount and description are required.');
     }
-    const target =
-      tableId === NO_TABLE
-        ? 'general expense'
-        : `Table #${mockTables.find((t) => t.id === tableId)?.number}`;
-    Alert.alert(
-      'Expense Saved',
-      `Rs. ${Number(amount).toLocaleString()} logged as ${category} for ${target}.`,
-      [
-        {
-          text: 'OK',
-          onPress: () => {
-            resetForm();
-            // Used as a tab — go back to Dashboard instead of stack-back
-            navigation.navigate?.('Dashboard');
+    if (saving) return;
+    setSaving(true);
+    try {
+      await addFinanceEntry({
+        type: 'Out',
+        category,
+        amount: Number(amount),
+        description,
+        table: tableId === NO_TABLE ? null : selectedTable?.number ?? null,
+      });
+      const target = tableId === NO_TABLE ? 'general expense' : `Table #${selectedTable?.number}`;
+      Alert.alert(
+        'Expense Saved',
+        `Rs. ${Number(amount).toLocaleString()} logged as ${category} for ${target}.`,
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              resetForm();
+              // Used as a tab — go back to Dashboard instead of stack-back
+              navigation.navigate?.('Dashboard');
+            },
           },
-        },
-      ]
-    );
+        ]
+      );
+    } catch (e) {
+      Alert.alert('Could not save expense', e?.message || 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -105,7 +123,7 @@ const AddExpenseScreen = ({ navigation, route }) => {
                 </Text>
               </Pressable>
 
-              {mockTables.map((t) => {
+              {tables.map((t) => {
                 const active = tableId === t.id;
                 return (
                   <Pressable
@@ -169,7 +187,7 @@ const AddExpenseScreen = ({ navigation, route }) => {
           <View style={styles.section}>
             <View style={styles.headRow}>
               <Text style={styles.sectionLabel}>
-                Previous {tableId === NO_TABLE ? 'General' : `Table #${mockTables.find((t) => t.id === tableId)?.number}`} Expenses
+                Previous {tableId === NO_TABLE ? 'General' : `Table #${selectedTable?.number}`} Expenses
               </Text>
               <View style={styles.totalPill}>
                 <Text style={styles.totalPillText}>Rs. {previousTotal.toLocaleString()}</Text>
@@ -198,8 +216,10 @@ const AddExpenseScreen = ({ navigation, route }) => {
           </View>
         </ScrollView>
 
-        <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
-          <GradientButton label="Save Expense" icon="save" onPress={handleSave} />
+        {/* This screen is the "Expense" tab, so the floating tab bar (~74px)
+            overlaps the bottom — pad the footer up so the button stays tappable. */}
+        <View style={[styles.footer, { paddingBottom: insets.bottom + 84 }]}>
+          <GradientButton label="Save Expense" icon="save" onPress={handleSave} loading={saving} disabled={saving} />
         </View>
       </KeyboardAvoidingView>
     </View>

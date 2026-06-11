@@ -12,11 +12,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, gradients, typography, spacing, borderRadius, shadows } from '../styles/theme';
-import { mockStats, mockBookings, getMTDFinance, dateKey } from '../data/mockData';
+import { getMTDFinance, dateKey } from '../data/mockData';
+import { useShots } from '../store/ShotsStore';
 import StatCard from '../components/StatCard';
 
 const DashboardScreen = ({ navigation }) => {
   const insets = useSafeAreaInsets();
+  const { bookings, finance, members } = useShots();
   const fade = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -31,16 +33,17 @@ const DashboardScreen = ({ navigation }) => {
 
   // Today's calculations
   const todayKey = dateKey(todayDate);
-  const todayBookings = mockBookings.filter((b) => b.date === todayKey).length;
-  const todayRevenue = mockBookings
+  const todayBookings = bookings.filter((b) => b.date === todayKey).length;
+  const todayRevenue = bookings
     .filter((b) => b.date === todayKey)
-    .reduce((s, b) => s + (b.amount || 0), 0) || mockStats.todayRevenue;
+    .reduce((s, b) => s + (b.amount || 0), 0);
 
   // Month-to-date calculations
-  const mtd = useMemo(() => getMTDFinance(todayDate), []);
-  const mtdRevenue = mtd.filter((f) => f.type === 'In').reduce((s, f) => s + f.amount, 0);
-  const mtdExpenses = mtd.filter((f) => f.type === 'Out').reduce((s, f) => s + f.amount, 0);
+  const mtd = useMemo(() => getMTDFinance(finance, todayDate), [finance]);
+  const mtdRevenue = mtd.filter((f) => f.type === 'In').reduce((s, f) => s + (f.amount || 0), 0);
+  const mtdExpenses = mtd.filter((f) => f.type === 'Out').reduce((s, f) => s + (f.amount || 0), 0);
   const mtdNet = mtdRevenue - mtdExpenses;
+  const activeMembers = members.filter((m) => m.status === 'Active').length;
 
   return (
     <View style={styles.root}>
@@ -148,7 +151,7 @@ const DashboardScreen = ({ navigation }) => {
             />
             <StatCard
               label="Active Members"
-              value={mockStats.activeMembers}
+              value={activeMembers}
               icon="people"
               color={colors.primary}
               delay={240}

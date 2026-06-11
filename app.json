@@ -34,6 +34,13 @@
           "resizeMode": "contain",
           "backgroundColor": "#0A0A0A"
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Shots to access your photos so you can attach a member's profile picture and ID card.",
+          "cameraPermission": "Allow Shots to use the camera so you can capture a member's profile picture and ID card."
+        }
       ]
     ],
     "extra": {

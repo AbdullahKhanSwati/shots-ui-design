@@ -3,8 +3,10 @@ import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, gradients, typography, spacing } from '../styles/theme';
+import { useAuth } from '../context/AuthContext';
 
 const SplashScreen = ({ navigation }) => {
+  const { session, loading } = useAuth();
   const scale = useRef(new Animated.Value(0.6)).current;
   const opacity = useRef(new Animated.Value(0)).current;
   const rotate = useRef(new Animated.Value(0)).current;
@@ -30,10 +32,18 @@ const SplashScreen = ({ navigation }) => {
       ]).start(() => animateDots());
     };
     animateDots();
+  }, [scale, opacity, rotate, dotsAnim]);
 
-    const timer = setTimeout(() => navigation.replace('BusinessSelection'), 2200);
+  // Route once the auth session has been restored (or confirmed absent).
+  // A signed-in staff member skips straight to the workspace.
+  useEffect(() => {
+    if (loading) return;
+    const timer = setTimeout(
+      () => navigation.replace(session ? 'Main' : 'BusinessSelection'),
+      1200
+    );
     return () => clearTimeout(timer);
-  }, [navigation, scale, opacity, rotate, dotsAnim]);
+  }, [navigation, loading, session]);
 
   const spin = rotate.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
 

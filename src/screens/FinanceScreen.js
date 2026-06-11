@@ -14,6 +14,7 @@ import { colors, gradients, typography, spacing, borderRadius, shadows } from '.
 import {
   getMTDFinance, getMonthFinance, previousMonths, dateKey,
 } from '../data/mockData';
+import { useShots } from '../store/ShotsStore';
 import SearchBar from '../components/SearchBar';
 import FilterChips from '../components/FilterChips';
 
@@ -25,6 +26,7 @@ const TYPES = [
 
 const FinanceScreen = ({ navigation }) => {
   const insets = useSafeAreaInsets();
+  const { finance } = useShots();
   const months = useMemo(() => previousMonths(12), []);
   const [monthIndex, setMonthIndex] = useState(0); // 0 = current month
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -36,15 +38,15 @@ const FinanceScreen = ({ navigation }) => {
 
   const items = useMemo(() => {
     const list = isCurrentMonth
-      ? getMTDFinance(new Date())
-      : getMonthFinance(selectedMonth.year, selectedMonth.month);
+      ? getMTDFinance(finance, new Date())
+      : getMonthFinance(finance, selectedMonth.year, selectedMonth.month);
     return list.filter((f) => {
       const matchT = type === 'All' || f.type === type;
       const q = query.trim().toLowerCase();
-      const matchQ = !q || f.category.toLowerCase().includes(q) || f.description.toLowerCase().includes(q);
+      const matchQ = !q || (f.category || '').toLowerCase().includes(q) || (f.description || '').toLowerCase().includes(q);
       return matchT && matchQ;
     });
-  }, [monthIndex, type, query, isCurrentMonth, selectedMonth]);
+  }, [finance, monthIndex, type, query, isCurrentMonth, selectedMonth]);
 
   const income = items.filter((i) => i.type === 'In').reduce((s, i) => s + i.amount, 0);
   const expense = items.filter((i) => i.type === 'Out').reduce((s, i) => s + i.amount, 0);

@@ -11,11 +11,42 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, gradients, typography, spacing, borderRadius, shadows } from '../styles/theme';
-import { mockBusinesses } from '../data/mockData';
+import { supabase } from '../lib/supabase';
 import GradientButton from '../components/GradientButton';
 
+// Map a `businesses` DB row → the shape this picker renders.
+function mapBusiness(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    tag: row.tag,
+    logo: row.emoji,
+    color: row.accent,
+    available: row.available,
+    defaultEmail: row.default_email,
+    defaultPassword: row.default_password,
+  };
+}
+
 const BusinessSelectionScreen = ({ navigation }) => {
-  const [selected, setSelected] = useState(mockBusinesses[0]);
+  const [businesses, setBusinesses] = useState([]);
+  const [selected, setSelected] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const { data } = await supabase
+        .from('businesses')
+        .select('*')
+        .order('sort_order', { ascending: true });
+      if (!active) return;
+      const list = (data || []).map(mapBusiness);
+      setBusinesses(list);
+      setSelected(list[0] || null);
+    })();
+    return () => { active = false; };
+  }, []);
 
   return (
     <View style={styles.root}>
@@ -36,7 +67,7 @@ const BusinessSelectionScreen = ({ navigation }) => {
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
         >
-          {mockBusinesses.map((business, i) => (
+          {businesses.map((business, i) => (
             <BusinessCard
               key={business.id}
               business={business}

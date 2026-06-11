@@ -4,16 +4,33 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, gradients, typography, spacing, borderRadius, shadows } from '../styles/theme';
+import { useAuth } from '../context/AuthContext';
 
 const MenuDrawer = ({ navigation }) => {
   const insets = useSafeAreaInsets();
+  const { session, logout } = useAuth();
+
+  const staffName = session?.profile?.name || 'Active Staff';
+  const staffEmail = session?.email || session?.profile?.email || '';
+  const avatarLetter = (staffName || 'S').trim().charAt(0).toUpperCase();
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } finally {
+      // The drawer is the "Main" screen of the root stack, so a single
+      // getParent() reaches the stack that owns the Login route.
+      const rootStack = navigation.getParent() || navigation;
+      rootStack.reset({ index: 0, routes: [{ name: 'Login' }] });
+    }
+  };
 
   const groups = [
     {
       title: 'Workspace',
       items: [
         { icon: 'home-outline', label: 'Dashboard', onPress: () => navigation.navigate('MainTabs', { screen: 'Dashboard' }) },
-        { icon: 'people-outline', label: 'Memberships', onPress: () => navigation.navigate('MainTabs', { screen: 'Memberships' }) },
+        { icon: 'people-outline', label: 'Memberships', onPress: () => navigation.navigate('MainTabs', { screen: 'Members' }) },
         { icon: 'grid-outline', label: 'Bookings', onPress: () => navigation.navigate('MainTabs', { screen: 'Bookings' }) },
         { icon: 'wallet-outline', label: 'Finance', onPress: () => navigation.navigate('MainTabs', { screen: 'Finance' }) },
       ],
@@ -21,7 +38,7 @@ const MenuDrawer = ({ navigation }) => {
     {
       title: 'Quick Actions',
       items: [
-        { icon: 'cash-outline', label: 'Add Expense', onPress: () => navigation.getParent()?.navigate('AddExpense') },
+        { icon: 'cash-outline', label: 'Add Expense', onPress: () => navigation.navigate('MainTabs', { screen: 'Expense' }) },
       ],
     },
     {
@@ -29,8 +46,7 @@ const MenuDrawer = ({ navigation }) => {
       items: [
 
         {
-          icon: 'log-out-outline', label: 'Logout', danger: true, onPress: () =>
-            navigation.getParent()?.getParent()?.reset({ index: 0, routes: [{ name: 'Login' }] })
+          icon: 'log-out-outline', label: 'Logout', danger: true, onPress: handleLogout,
         },
       ],
     },
@@ -52,11 +68,11 @@ const MenuDrawer = ({ navigation }) => {
 
         <View style={styles.profileRow}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>S</Text>
+            <Text style={styles.avatarText}>{avatarLetter}</Text>
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.profileName}>Active Staff</Text>
-            <Text style={styles.profileMeta}>staff@shots.com</Text>
+            <Text style={styles.profileName}>{staffName}</Text>
+            <Text style={styles.profileMeta}>{staffEmail}</Text>
           </View>
           <View style={styles.online}>
             <View style={styles.onlineDot} />

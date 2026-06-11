@@ -17,18 +17,24 @@ import {
   colors, gradients, typography, spacing, borderRadius, shadows,
 } from '../styles/theme';
 import {
-  mockTables, mockBookings,
   buildIntervals, nextSevenDays, dateKey, bookedIntervalsFor, findBookingByInterval,
-  removeBooking, tableFreeIn,
+  tableFreeIn,
 } from '../data/mockData';
+import { useShots } from '../store/ShotsStore';
 import ScreenHeader from '../components/ScreenHeader';
 import GradientButton from '../components/GradientButton';
 
+const STATUSES = [
+  { value: 'Available',   label: 'Available',   icon: 'checkmark-circle', color: colors.success },
+  { value: 'Occupied',    label: 'Occupied',    icon: 'time',             color: colors.primary },
+  { value: 'Maintenance', label: 'Maintenance', icon: 'construct',        color: colors.warning },
+];
+
 const TableDetailScreen = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
+  const { tables, bookings, updateTable, updateBooking, deleteBooking } = useShots();
   const id = route.params?.tableId;
-  const seed = mockTables.find((t) => t.id === id) || mockTables[0];
-  const [table, setTable] = useState(seed);
+  const table = tables.find((t) => t.id === id);
 
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [tick, setTick] = useState(0);
@@ -38,18 +44,18 @@ const TableDetailScreen = ({ navigation, route }) => {
 
   const dates = useMemo(() => nextSevenDays(), []);
   const intervals = useMemo(
-    () => buildIntervals(table.openTime, table.closeTime, 15),
-    [table.openTime, table.closeTime]
+    () => buildIntervals(table?.openTime, table?.closeTime, 15),
+    [table?.openTime, table?.closeTime]
   );
   const booked = useMemo(
-    () => bookedIntervalsFor(table.id, selectedDate),
-    [table.id, selectedDate, tick]
+    () => bookedIntervalsFor(bookings, id, selectedDate),
+    [bookings, id, selectedDate, tick]
   );
 
   const dKey = dateKey(selectedDate);
   const isToday = dKey === dateKey(new Date());
   const nowValue = nowHHMM();
-  const freeIn = tableFreeIn(table);
+  const freeIn = table ? tableFreeIn(table) : null;
 
   const handleEndSession = () => {
     Alert.alert(
@@ -60,13 +66,15 @@ const TableDetailScreen = ({ navigation, route }) => {
         {
           text: 'Mark Available',
           style: 'destructive',
-          onPress: () => {
-            setTable((t) => ({ ...t, status: 'Available', occupiedUntil: null, occupiedBy: null }));
-            const active = mockBookings.find((b) => b.tableId === table.id && b.status === 'Active');
-            if (active) {
-              active.status = 'Completed';
-              active.endedEarly = true;
-              active.end = nowHHMM();
+          onPress: async () => {
+            try {
+              await updateTable(table.id, { status: 'Available', occupiedUntil: null, occupiedBy: null });
+              const active = bookings.find((b) => b.tableId === table.id && b.status === 'Active');
+              if (active) {
+                await updateBooking(active.id, { status: 'Completed', end: nowHHMM() });
+              }
+            } catch (e) {
+              Alert.alert('Could not end session', e?.message || 'Please try again.');
             }
             setTick((t) => t + 1);
           },
@@ -75,9 +83,43 @@ const TableDetailScreen = ({ navigation, route }) => {
     );
   };
 
+  const handleSetStatus = (next) => {
+    if (next === table.status) return;
+    const apply = async () => {
+      const patch = { status: next };
+      // Clearing to Available also frees any lingering occupied session.
+      if (next === 'Available') { patch.occupiedUntil = null; patch.occupiedBy = null; }
+      try {
+        await updateTable(table.id, patch);
+      } catch (e) {
+        Alert.alert('Could not update status', e?.message || 'Please try again.');
+      }
+      setTick((t) => t + 1);
+    };
+    if (next === 'Maintenance') {
+      Alert.alert(
+        'Mark for maintenance?',
+        `Table #${table.number} will be unavailable for new bookings until you set it back to Available.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Mark Maintenance', style: 'destructive', onPress: apply },
+        ]
+      );
+      return;
+    }
+    apply();
+  };
+
   const onPickSlot = (interval) => {
+    if (table.status === 'Maintenance') {
+      Alert.alert(
+        'Table under maintenance',
+        'This table is marked for maintenance and cannot be booked. Set it back to Available first.'
+      );
+      return;
+    }
     if (booked.has(interval.value)) {
-      const b = findBookingByInterval(table.id, selectedDate, interval.value);
+      const b = findBookingByInterval(bookings, id, selectedDate, interval.value);
       if (b) setBookingModal({ booking: b });
       return;
     }
@@ -108,8 +150,8 @@ const TableDetailScreen = ({ navigation, route }) => {
         {
           text: 'Cancel booking',
           style: 'destructive',
-          onPress: () => {
-            removeBooking(b.id);
+          onPress: async () => {
+            await deleteBooking(b.id);
             setBookingModal(null);
             setTick((t) => t + 1);
           },
@@ -117,6 +159,19 @@ const TableDetailScreen = ({ navigation, route }) => {
       ]
     );
   };
+
+  if (!table) {
+    return (
+      <View style={styles.root}>
+        <ScreenHeader
+          title="Table"
+          subtitle="Not found"
+          onBack={() => navigation.goBack()}
+          variant="gradient"
+        />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.root}>
@@ -181,6 +236,34 @@ const TableDetailScreen = ({ navigation, route }) => {
           <View style={styles.priceDivider} />
           <PriceTile icon="person" label="Non-Member" value={`Rs. ${table.nonMemberRate}/hr`} color={colors.text} />
         </View>
+
+        {/* Table status control */}
+        <Text style={styles.sectionTitle}>Table status</Text>
+        <View style={styles.statusRow}>
+          {STATUSES.map((s) => {
+            const active = table.status === s.value;
+            return (
+              <TouchableOpacity
+                key={s.value}
+                activeOpacity={0.85}
+                onPress={() => handleSetStatus(s.value)}
+                style={[styles.statusBtn, active && { backgroundColor: s.color, borderColor: s.color }]}
+              >
+                <Ionicons name={s.icon} size={15} color={active ? colors.white : s.color} />
+                <Text style={[styles.statusBtnText, { color: active ? colors.white : colors.text }]}>{s.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {table.status === 'Maintenance' ? (
+          <View style={styles.maintBanner}>
+            <Ionicons name="construct" size={16} color={colors.warning} />
+            <Text style={styles.maintBannerText}>
+              This table is under maintenance. New bookings are disabled until it's set back to Available.
+            </Text>
+          </View>
+        ) : null}
 
         {/* Date selector */}
         <Text style={styles.sectionTitle}>Select a date</Text>
@@ -427,6 +510,25 @@ const styles = StyleSheet.create({
   priceDivider: { width: 1, marginHorizontal: spacing.md, backgroundColor: colors.border },
 
   sectionTitle: { ...typography.h4, color: colors.text, marginBottom: spacing.sm },
+  statusRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },
+  statusBtn: {
+    flex: 1,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1.5, borderColor: colors.border,
+  },
+  statusBtnText: { ...typography.caption, fontWeight: '800', textTransform: 'none', letterSpacing: 0 },
+  maintBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    backgroundColor: colors.warningSoft || 'rgba(245,158,11,0.12)',
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    marginTop: -spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  maintBannerText: { flex: 1, ...typography.bodySmall, color: colors.text },
   datesRow: { gap: spacing.sm, paddingBottom: spacing.md, paddingRight: 4 },
   dateChip: {
     width: 60, paddingVertical: spacing.sm,

@@ -16,10 +16,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, gradients, typography, spacing, borderRadius, shadows } from '../styles/theme';
 import GradientButton from '../components/GradientButton';
+import { useAuth } from '../context/AuthContext';
 
-const LoginScreen = ({ navigation }) => {
-  const [email, setEmail] = useState('staff@shots.com');
-  const [password, setPassword] = useState('password');
+const LoginScreen = ({ navigation, route }) => {
+  const { login } = useAuth();
+  const business = route.params?.business;
+  const [email, setEmail] = useState(business?.defaultEmail || '');
+  const [password, setPassword] = useState(business?.defaultPassword || '');
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -33,15 +36,19 @@ const LoginScreen = ({ navigation }) => {
     ]).start();
   }, [fade, translateY]);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!email || !password) {
       return Alert.alert('Missing info', 'Email & password are required.');
     }
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      await login(email, password);
       navigation.replace('Main');
-    }, 900);
+    } catch (e) {
+      Alert.alert('Sign in failed', e?.message || 'Please check your credentials and try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

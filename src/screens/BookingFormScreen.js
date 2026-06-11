@@ -17,10 +17,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, typography, spacing, borderRadius, shadows } from '../styles/theme';
 import {
-  mockTables, mockMemberships, mockBookings,
-  addBooking, updateBooking,
   intervalsForRange, bookedIntervalsFor, addMinutes,
 } from '../data/mockData';
+import { useShots } from '../store/ShotsStore';
 import GradientButton from '../components/GradientButton';
 import ScreenHeader from '../components/ScreenHeader';
 
@@ -38,10 +37,12 @@ const MAX_MEMBERS = 4;
 
 const BookingFormScreen = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
+  const { tables, members: memberList, bookings, addBooking, updateBooking } = useShots();
   const { tableId, date, startValue, startLabel, bookingId } = route.params || {};
-  const table = mockTables.find((t) => t.id === tableId) || mockTables[0];
+  const table = tables.find((t) => t.id === tableId);
   const editing = !!bookingId;
-  const existing = editing ? mockBookings.find((b) => b.id === bookingId) : null;
+  const existing = editing ? bookings.find((b) => b.id === bookingId) : null;
+  const [saving, setSaving] = useState(false);
 
   const initialDuration = useMemo(() => {
     if (!existing) return DURATIONS[3]; // 1h
@@ -51,7 +52,9 @@ const BookingFormScreen = ({ navigation, route }) => {
 
   const [duration, setDuration] = useState(initialDuration);
   const [isMember, setIsMember] = useState(existing ? existing.isMember !== false : true);
-  const [members, setMembers] = useState(existing?.members?.slice(0, MAX_MEMBERS) || [mockMemberships[0]]);
+  const [members, setMembers] = useState(
+    existing?.members?.slice(0, MAX_MEMBERS) || (memberList[0] ? [memberList[0]] : [])
+  );
   const [guestName, setGuestName] = useState(existing && !existing.isMember ? existing.memberName : '');
   const [guestPhone, setGuestPhone] = useState('');
   const [memberPickerOpen, setMemberPickerOpen] = useState(false);
@@ -72,12 +75,26 @@ const BookingFormScreen = ({ navigation, route }) => {
 
   // when editing, exclude this booking's own intervals from conflict detection
   const existingBooked = useMemo(() => {
-    const set = bookedIntervalsFor(table.id, effectiveDate);
+    const set = bookedIntervalsFor(bookings, table?.id, effectiveDate);
     if (editing && existing) {
       existing.intervals?.forEach((iv) => set.delete(iv));
     }
     return set;
-  }, [table.id, effectiveDate, editing, existing]);
+  }, [bookings, table?.id, effectiveDate, editing, existing]);
+
+  if (!table) {
+    return (
+      <View style={styles.root}>
+        <ScreenHeader
+          title="Booking"
+          subtitle="Table not found"
+          onBack={() => navigation.goBack()}
+          variant="gradient"
+        />
+      </View>
+    );
+  }
+
   const conflict = reservedIntervals.some((iv) => existingBooked.has(iv));
 
   const rate = isMember ? table.memberRate : table.nonMemberRate;
@@ -106,7 +123,10 @@ const BookingFormScreen = ({ navigation, route }) => {
     });
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
+    if (!editing && table.status === 'Maintenance') {
+      return Alert.alert('Table under maintenance', 'This table cannot be booked while under maintenance.');
+    }
     if (conflict) {
       return Alert.alert('Conflict', 'Selected duration overlaps an existing booking. Pick a shorter duration.');
     }
@@ -116,6 +136,7 @@ const BookingFormScreen = ({ navigation, route }) => {
     if (!isMember && !guestName) {
       return Alert.alert('Missing info', 'Please enter the guest name.');
     }
+    if (saving) return;
 
     const discountPayload =
       discountType !== 'none' && Number(discountValue) > 0
@@ -129,6 +150,7 @@ const BookingFormScreen = ({ navigation, route }) => {
       start: effectiveStart,
       end: endValue,
       intervals: reservedIntervals,
+      players: isMember ? members.length : 1,
       isMember,
       members: isMember ? members.map((m) => ({ id: m.id, name: m.name, type: m.type })) : [],
       memberType: isMember ? members[0]?.type : 'Guest',
@@ -139,18 +161,25 @@ const BookingFormScreen = ({ navigation, route }) => {
       amount: total,
     };
 
-    if (editing) {
-      updateBooking(bookingId, payload);
-      Alert.alert('Booking Updated', `Table #${table.number} updated for ${dateLabel}.`, [
-        { text: 'OK', onPress: () => navigation.goBack() },
-      ]);
-    } else {
-      addBooking(payload);
-      Alert.alert(
-        'Booking Confirmed',
-        `Table #${table.number} booked ${dateLabel} from ${effectiveStart} to ${endValue} for Rs. ${total.toLocaleString()}.`,
-        [{ text: 'OK', onPress: () => navigation.goBack() }]
-      );
+    setSaving(true);
+    try {
+      if (editing) {
+        await updateBooking(bookingId, payload);
+        Alert.alert('Booking Updated', `Table #${table.number} updated for ${dateLabel}.`, [
+          { text: 'OK', onPress: () => navigation.goBack() },
+        ]);
+      } else {
+        await addBooking(payload);
+        Alert.alert(
+          'Booking Confirmed',
+          `Table #${table.number} booked ${dateLabel} from ${effectiveStart} to ${endValue} for Rs. ${total.toLocaleString()}.`,
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
+        );
+      }
+    } catch (e) {
+      Alert.alert('Could not save booking', e?.message || 'Please try again.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -379,7 +408,8 @@ const BookingFormScreen = ({ navigation, route }) => {
               label={editing ? 'Save Changes' : 'Confirm Booking'}
               icon="checkmark"
               onPress={handleConfirm}
-              disabled={conflict}
+              loading={saving}
+              disabled={conflict || saving}
             />
           </View>
         </View>
@@ -406,7 +436,7 @@ const BookingFormScreen = ({ navigation, route }) => {
             </View>
 
             <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
-              {mockMemberships.map((m) => {
+              {memberList.map((m) => {
                 const selected = !!members.find((x) => x.id === m.id);
                 return (
                   <TouchableOpacity

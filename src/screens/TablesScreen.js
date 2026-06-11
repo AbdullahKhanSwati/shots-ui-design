@@ -11,7 +11,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, gradients, typography, spacing, borderRadius, shadows } from '../styles/theme';
-import { mockTables, mockBookings, sortBookingsByTableThenTime, dateKey } from '../data/mockData';
+import { sortBookingsByTableThenTime, dateKey } from '../data/mockData';
+import { useShots } from '../store/ShotsStore';
 import TableCard from '../components/TableCard';
 import SearchBar from '../components/SearchBar';
 import FilterChips from '../components/FilterChips';
@@ -30,6 +31,7 @@ const TYPE_OPTIONS = [
 
 const TablesScreen = ({ navigation }) => {
   const insets = useSafeAreaInsets();
+  const { tables, bookings } = useShots();
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('All');
   const [type, setType] = useState('All');
@@ -43,7 +45,7 @@ const TablesScreen = ({ navigation }) => {
   );
 
   const filtered = useMemo(() => {
-    return mockTables.filter((t) => {
+    return tables.filter((t) => {
       const q = query.trim().toLowerCase();
       const matchQ =
         !q ||
@@ -54,12 +56,12 @@ const TablesScreen = ({ navigation }) => {
       const matchType = type === 'All' || t.type === type;
       return matchQ && matchStatus && matchType;
     });
-  }, [query, status, type]);
+  }, [tables, query, status, type]);
 
   // Today's bookings — grouped by table, sorted by time within each table
   const grouped = useMemo(() => {
     const todayKey = dateKey(new Date());
-    const todayList = mockBookings.filter((b) => b.date === todayKey);
+    const todayList = bookings.filter((b) => b.date === todayKey);
     const sorted = sortBookingsByTableThenTime(todayList);
     const map = new Map();
     sorted.forEach((b) => {
@@ -67,14 +69,14 @@ const TablesScreen = ({ navigation }) => {
       map.get(b.tableId).push(b);
     });
     return Array.from(map.entries()); // [[tableId, bookings], ...]
-  }, [tick]);
+  }, [bookings, tick]);
 
   const totalRevenue = useMemo(() => {
     const todayKey = dateKey(new Date());
-    return mockBookings
+    return bookings
       .filter((b) => b.date === todayKey)
       .reduce((s, b) => s + (b.amount || 0), 0);
-  }, [tick]);
+  }, [bookings, tick]);
 
   return (
     <View style={styles.root}>

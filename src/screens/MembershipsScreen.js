@@ -11,7 +11,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, gradients, typography, spacing, borderRadius, shadows } from '../styles/theme';
-import { mockMemberships } from '../data/mockData';
+import { useShots } from '../store/ShotsStore';
 import MembershipCard from '../components/MembershipCard';
 import SearchBar from '../components/SearchBar';
 import FilterChips from '../components/FilterChips';
@@ -27,12 +27,13 @@ const buildFilters = (members) => [
 
 const MembershipsScreen = ({ navigation }) => {
   const insets = useSafeAreaInsets();
+  const { members } = useShots();
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('All');
   const [scanOpen, setScanOpen] = useState(false);
 
   const list = useMemo(() => {
-    return mockMemberships.filter((m) => {
+    return members.filter((m) => {
       const q = query.trim().toLowerCase();
       const matchQ =
         !q ||
@@ -45,10 +46,10 @@ const MembershipsScreen = ({ navigation }) => {
         m.type === filter;
       return matchQ && matchF;
     });
-  }, [query, filter]);
+  }, [members, query, filter]);
 
-  const activeCount = mockMemberships.filter((m) => m.status === 'Active').length;
-  const expiredCount = mockMemberships.filter((m) => m.status === 'Expired').length;
+  const activeCount = members.filter((m) => m.status === 'Active').length;
+  const expiredCount = members.filter((m) => m.status === 'Expired').length;
 
   return (
     <View style={styles.root}>
@@ -69,7 +70,7 @@ const MembershipsScreen = ({ navigation }) => {
         </View>
 
         <View style={styles.statsRow}>
-          <HeroPill label="Total" value={mockMemberships.length} icon="people" />
+          <HeroPill label="Total" value={members.length} icon="people" />
           <HeroPill label="Active" value={activeCount} icon="checkmark-circle" />
           <HeroPill label="Expired" value={expiredCount} icon="time" />
         </View>
@@ -79,7 +80,7 @@ const MembershipsScreen = ({ navigation }) => {
         <SearchBar value={query} onChangeText={setQuery} placeholder="Search by name, ID or phone…" />
       </View>
 
-      <FilterChips items={buildFilters(mockMemberships)} value={filter} onChange={setFilter} />
+      <FilterChips items={buildFilters(members)} value={filter} onChange={setFilter} />
 
       <FlatList
         data={list}

@@ -18,16 +18,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import { colors, typography, spacing, borderRadius, shadows } from '../styles/theme';
-import { mockMemberships, mockBookings, membershipDurations } from '../data/mockData';
+import { membershipDurations } from '../data/mockData';
+import { useShots } from '../store/ShotsStore';
 import MembershipVirtualCard from '../components/MembershipVirtualCard';
 import ScreenHeader from '../components/ScreenHeader';
 import GradientButton from '../components/GradientButton';
 
 const MemberDetailScreen = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
+  const { members, bookings, updateMember, addFinanceEntry } = useShots();
   const id = route.params?.memberId;
-  const member = mockMemberships.find((m) => m.id === id) || mockMemberships[0];
-  const visits = mockBookings.filter((b) => b.memberId === member.id);
+  const member = members.find((m) => m.id === id);
+  const visits = bookings.filter((b) => b.memberId === id);
 
   const [renewOpen, setRenewOpen] = useState(false);
   const [renewDuration, setRenewDuration] = useState(membershipDurations[3]);
@@ -99,27 +101,86 @@ const MemberDetailScreen = ({ navigation, route }) => {
     }
   };
 
+  const applyRenewal = async () => {
+    // Extend from whichever is later: today or the current expiry date.
+    const base = (() => {
+      const current = member.expiryDate ? new Date(member.expiryDate) : null;
+      const now = new Date();
+      return current && current > now ? current : now;
+    })();
+    base.setMonth(base.getMonth() + renewDuration.months);
+    const newExpiry = base.toISOString().slice(0, 10);
+
+    try {
+      await updateMember(member.id, { expiryDate: newExpiry, status: 'Active' });
+      if (renewPrice && Number(renewPrice) > 0) {
+        await addFinanceEntry({
+          type: 'In',
+          category: 'Membership',
+          amount: Number(renewPrice),
+          description: `Membership renewal (${renewDuration.label}) — ${member.name}`,
+        });
+      }
+      const priceMsg = renewPrice
+        ? ` Rs. ${Number(renewPrice).toLocaleString()} added to revenue.`
+        : '';
+      Alert.alert('Renewed', `${member.name}'s membership renewed for ${renewDuration.label}.${priceMsg}`);
+      setRenewOpen(false);
+      setRenewPrice('');
+    } catch (e) {
+      Alert.alert('Could not renew', e?.message || 'Please try again.');
+    }
+  };
+
   const confirmRenew = () => {
     Alert.alert(
       'Renew membership?',
       `This will extend ${member.name}'s membership by ${renewDuration.label}. Make sure this is correct before continuing.`,
       [
         { text: 'Cancel', style: 'cancel' },
+        { text: 'Confirm Renewal', style: 'default', onPress: applyRenewal },
+      ]
+    );
+  };
+
+  const handleSuspend = () => {
+    Alert.alert(
+      'Suspend member?',
+      `This will mark ${member.name} as inactive (Expired). You can re-activate them later by renewing.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Confirm Renewal',
-          style: 'default',
-          onPress: () => {
-            const priceMsg = renewPrice
-              ? ` Rs. ${Number(renewPrice).toLocaleString()} added to revenue.`
-              : '';
-            Alert.alert('Renewed', `${member.name}'s membership renewed for ${renewDuration.label}.${priceMsg}`);
-            setRenewOpen(false);
-            setRenewPrice('');
+          text: 'Suspend',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await updateMember(member.id, { status: 'Expired' });
+              Alert.alert('Suspended', `${member.name} suspended.`);
+            } catch (e) {
+              Alert.alert('Could not suspend', e?.message || 'Please try again.');
+            }
           },
         },
       ]
     );
   };
+
+  if (!member) {
+    return (
+      <View style={styles.root}>
+        <ScreenHeader
+          title="Member"
+          subtitle="Not found"
+          onBack={() => navigation.goBack()}
+          variant="gradient"
+        />
+        <View style={styles.empty}>
+          <Ionicons name="person-outline" size={40} color={colors.textMuted} />
+          <Text style={styles.emptyText}>This member could not be loaded.</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.root}>
@@ -203,7 +264,7 @@ const MemberDetailScreen = ({ navigation, route }) => {
       <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
         <TouchableOpacity
           style={styles.outlineBtn}
-          onPress={() => Alert.alert('Suspended', `${member.name} suspended.`)}
+          onPress={handleSuspend}
         >
           <Ionicons name="pause-circle-outline" size={18} color={colors.primary} />
           <Text style={styles.outlineBtnText}>Suspend</Text>

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   Alert,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -12,15 +13,19 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, typography, spacing, borderRadius, shadows } from '../styles/theme';
-import { mockMemberships, generateMemberId, membershipDurations, membershipTiers } from '../data/mockData';
+import { generateMemberId, membershipDurations, membershipTiers } from '../data/mockData';
+import { useShots } from '../store/ShotsStore';
+import { uploadToBucket } from '../lib/supabase';
 import GradientButton from '../components/GradientButton';
 import MembershipVirtualCard from '../components/MembershipVirtualCard';
 import ScreenHeader from '../components/ScreenHeader';
 
 const AddMemberScreen = ({ navigation }) => {
   const insets = useSafeAreaInsets();
+  const { members, addMember, addFinanceEntry } = useShots();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
@@ -30,8 +35,9 @@ const AddMemberScreen = ({ navigation }) => {
   const [tier, setTier] = useState('Premium');
   const [duration, setDuration] = useState(membershipDurations[3]); // 1 Year
   const [price, setPrice] = useState('');
+  const [saving, setSaving] = useState(false);
 
-  const existingIds = useMemo(() => mockMemberships.map((m) => m.id), []);
+  const existingIds = useMemo(() => members.map((m) => m.id), [members]);
   const memberId = useMemo(() => {
     if (!idCardNumber || idCardNumber.replace(/\D/g, '').length < 6) return null;
     return generateMemberId(idCardNumber, existingIds);
@@ -50,19 +56,106 @@ const AddMemberScreen = ({ navigation }) => {
     idCardNumber: idCardNumber || '',
     expiryDate,
     status: 'Active',
-    photo: memberPhoto,
+    photo: memberPhoto?.uri || null,
   };
 
   const canSubmit = name && phone && idCardNumber && memberId;
 
-  const handleSubmit = () => {
+  // Pick an image from the camera or gallery, then hand the selected asset to `setter`.
+  const launchPicker = async (source, setter, aspect) => {
+    try {
+      const opts = { mediaTypes: ['images'], allowsEditing: true, quality: 0.7, ...(aspect ? { aspect } : {}) };
+      let result;
+      if (source === 'camera') {
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) {
+          return Alert.alert('Permission needed', 'Camera access is required to take a photo.');
+        }
+        result = await ImagePicker.launchCameraAsync(opts);
+      } else {
+        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) {
+          return Alert.alert('Permission needed', 'Photo library access is required to choose an image.');
+        }
+        result = await ImagePicker.launchImageLibraryAsync(opts);
+      }
+      if (!result.canceled && result.assets?.[0]) {
+        const a = result.assets[0];
+        setter({ uri: a.uri, mimeType: a.mimeType, fileName: a.fileName });
+      }
+    } catch (e) {
+      Alert.alert('Could not open picker', e?.message || 'Please try again.');
+    }
+  };
+
+  const pickImage = (setter, aspect) => {
+    Alert.alert('Add Photo', 'Choose a source', [
+      { text: 'Take Photo', onPress: () => launchPicker('camera', setter, aspect) },
+      { text: 'Choose from Gallery', onPress: () => launchPicker('library', setter, aspect) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const handleSubmit = async () => {
     if (!canSubmit) {
       return Alert.alert('Incomplete', 'Name, phone and CNIC are required.');
     }
-    const priceMsg = price ? ` Rs. ${Number(price).toLocaleString()} added to revenue.` : '';
-    Alert.alert('Member Added', `${name} registered with ID ${memberId}.${priceMsg}`, [
-      { text: 'OK', onPress: () => navigation.goBack() },
-    ]);
+    if (saving) return;
+    setSaving(true);
+    try {
+      // Upload the picked profile photo / ID card to Storage and persist the
+      // returned references (public URL for the photo, object path for the CNIC).
+      let photoUrl = null;
+      if (memberPhoto?.uri) {
+        photoUrl = await uploadToBucket(
+          'member-photos',
+          { uri: memberPhoto.uri, name: memberPhoto.fileName, type: memberPhoto.mimeType },
+          'members/',
+        );
+      }
+      let cnicImage = null;
+      if (idCardImage?.uri) {
+        cnicImage = await uploadToBucket(
+          'member-cnic',
+          { uri: idCardImage.uri, name: idCardImage.fileName, type: idCardImage.mimeType },
+          'cnic/',
+        );
+      }
+
+      await addMember({
+        id: memberId,
+        name,
+        phone,
+        email: email || null,
+        idCardNumber,
+        type: tier,
+        joinDate: new Date().toISOString().slice(0, 10),
+        expiryDate,
+        status: 'Active',
+        visits: 0,
+        totalSpent: Number(price) || 0,
+        photo: photoUrl,
+        cnicImage,
+      });
+
+      if (price && Number(price) > 0) {
+        await addFinanceEntry({
+          type: 'In',
+          category: 'Membership',
+          amount: Number(price),
+          description: `New ${tier} membership — ${name}`,
+        });
+      }
+
+      const priceMsg = price ? ` Rs. ${Number(price).toLocaleString()} added to revenue.` : '';
+      Alert.alert('Member Added', `${name} registered with ID ${memberId}.${priceMsg}`, [
+        { text: 'OK', onPress: () => navigation.goBack() },
+      ]);
+    } catch (e) {
+      Alert.alert('Could not add member', e?.message || 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -104,14 +197,12 @@ const AddMemberScreen = ({ navigation }) => {
             <Text style={styles.sectionLabel}>Member Photo</Text>
             <TouchableOpacity
               activeOpacity={0.85}
-              onPress={() => setMemberPhoto(memberPhoto ? null : 'placeholder')}
+              onPress={() => (memberPhoto ? setMemberPhoto(null) : pickImage(setMemberPhoto, [1, 1]))}
               style={styles.photoBox}
             >
               {memberPhoto ? (
                 <View style={styles.uploadedRow}>
-                  <View style={styles.uploadedIcon}>
-                    <Ionicons name="image" size={18} color={colors.success} />
-                  </View>
+                  <Image source={{ uri: memberPhoto.uri }} style={styles.thumb} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.uploadedTitle}>Photo Attached</Text>
                     <Text style={styles.uploadedMeta}>Tap to remove</Text>
@@ -144,16 +235,14 @@ const AddMemberScreen = ({ navigation }) => {
             <TouchableOpacity
               style={styles.uploadBox}
               activeOpacity={0.85}
-              onPress={() => setIdCardImage(idCardImage ? null : 'uploaded')}
+              onPress={() => (idCardImage ? setIdCardImage(null) : pickImage(setIdCardImage, [16, 10]))}
             >
               {idCardImage ? (
                 <View style={styles.uploadedRow}>
-                  <View style={styles.uploadedIcon}>
-                    <Ionicons name="checkmark" size={18} color={colors.success} />
-                  </View>
+                  <Image source={{ uri: idCardImage.uri }} style={styles.thumbWide} />
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.uploadedTitle}>ID Card Uploaded</Text>
-                    <Text style={styles.uploadedMeta}>id-card-front.jpg</Text>
+                    <Text style={styles.uploadedTitle}>ID Card Attached</Text>
+                    <Text style={styles.uploadedMeta}>Tap to remove</Text>
                   </View>
                   <Ionicons name="close-circle" size={20} color={colors.textMuted} />
                 </View>
@@ -250,7 +339,8 @@ const AddMemberScreen = ({ navigation }) => {
             label="Create Membership"
             icon="checkmark-circle"
             onPress={handleSubmit}
-            disabled={!canSubmit}
+            loading={saving}
+            disabled={!canSubmit || saving}
           />
         </View>
       </KeyboardAvoidingView>
@@ -346,6 +436,14 @@ const styles = StyleSheet.create({
   uploadTitle: { ...typography.body, color: colors.primary, fontWeight: '800' },
   uploadHint: { ...typography.caption, color: colors.textLight, marginTop: 4, textTransform: 'none', letterSpacing: 0 },
   uploadedRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  thumb: {
+    width: 48, height: 48, borderRadius: borderRadius.md,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  thumbWide: {
+    width: 64, height: 40, borderRadius: borderRadius.sm,
+    borderWidth: 1, borderColor: colors.border,
+  },
   uploadedIcon: {
     width: 36, height: 36, borderRadius: 18,
     backgroundColor: colors.successSoft,
