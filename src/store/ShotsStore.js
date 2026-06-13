@@ -28,12 +28,13 @@ const TABLE_KEYS = {
   number: 'number', type: 'type', location: 'location', status: 'status',
   condition: 'condition', lastCleaned: 'last_cleaned', memberRate: 'member_rate',
   nonMemberRate: 'non_member_rate', openTime: 'open_time', closeTime: 'close_time',
-  occupiedUntil: 'occupied_until', occupiedBy: 'occupied_by',
+  occupiedUntil: 'occupied_until', occupiedBy: 'occupied_by', image: 'image',
 };
 const MEMBER_KEYS = {
   name: 'name', type: 'type', idCardNumber: 'cnic', joinDate: 'join_date',
   expiryDate: 'expiry_date', status: 'status', phone: 'phone', email: 'email',
-  visits: 'visits', totalSpent: 'total_spent', photo: 'photo', cnicImage: 'cnic_image',
+  visits: 'visits', totalSpent: 'total_spent', photo: 'photo',
+  cnicImage: 'cnic_image', cnicImageBack: 'cnic_image_back',
 };
 const BOOKING_KEYS = {
   tableId: 'table_id', tableNumber: 'table_number', date: 'date', start: 'start_time',
@@ -61,7 +62,7 @@ function fromRow(row, keymap) {
   return out;
 }
 
-const rowToTable = (r) => ({ ...fromRow(r, TABLE_KEYS), image: null });
+const rowToTable = (r) => fromRow(r, TABLE_KEYS);
 const rowToMember = (r) => fromRow(r, MEMBER_KEYS);
 const rowToBooking = (r) => fromRow(r, BOOKING_KEYS);
 const rowToFinance = (r) => fromRow(r, FINANCE_KEYS);

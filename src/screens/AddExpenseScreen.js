@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { colors, typography, spacing, borderRadius, shadows } from '../styles/theme';
 import { expenseCategories } from '../data/mockData';
 import { useShots } from '../store/ShotsStore';
@@ -24,29 +25,39 @@ const AddExpenseScreen = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
   const { tables, finance, addFinanceEntry } = useShots();
   const initialTableId = route.params?.tableId;
+
+  // 'list' shows the history; 'form' shows the add-expense form.
+  const [mode, setMode] = useState('list');
   const [tableId, setTableId] = useState(initialTableId ?? NO_TABLE);
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('Repair');
   const [saving, setSaving] = useState(false);
 
+  // Always land on the list when the tab is opened.
+  useFocusEffect(useCallback(() => { setMode('list'); }, []));
+
   const selectedTable = tables.find((t) => t.id === tableId);
 
-  // Expenses are stored against a table's NUMBER (transactions.table_ref).
-  const previous = useMemo(
-    () =>
-      finance.filter(
-        (e) => e.type === 'Out' && (tableId === NO_TABLE ? !e.table : e.table === selectedTable?.number)
-      ),
-    [finance, tableId, selectedTable]
-  );
-  const previousTotal = previous.reduce((s, e) => s + (e.amount || 0), 0);
+  // All expenses (most recent first) for the history list.
+  const allExpenses = useMemo(() => {
+    return finance
+      .filter((e) => e.type === 'Out')
+      .slice()
+      .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.time || '').localeCompare(a.time || ''));
+  }, [finance]);
+  const expensesTotal = allExpenses.reduce((s, e) => s + (e.amount || 0), 0);
 
   const resetForm = () => {
     setAmount('');
     setDescription('');
     setCategory('Repair');
     setTableId(initialTableId ?? NO_TABLE);
+  };
+
+  const openForm = () => {
+    resetForm();
+    setMode('form');
   };
 
   const handleSave = async () => {
@@ -63,21 +74,8 @@ const AddExpenseScreen = ({ navigation, route }) => {
         description,
         table: tableId === NO_TABLE ? null : selectedTable?.number ?? null,
       });
-      const target = tableId === NO_TABLE ? 'general expense' : `Table #${selectedTable?.number}`;
-      Alert.alert(
-        'Expense Saved',
-        `Rs. ${Number(amount).toLocaleString()} logged as ${category} for ${target}.`,
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              resetForm();
-              // Used as a tab — go back to Dashboard instead of stack-back
-              navigation.navigate?.('Dashboard');
-            },
-          },
-        ]
-      );
+      resetForm();
+      setMode('list'); // back to the history, which now includes the new entry
     } catch (e) {
       Alert.alert('Could not save expense', e?.message || 'Please try again.');
     } finally {
@@ -85,12 +83,73 @@ const AddExpenseScreen = ({ navigation, route }) => {
     }
   };
 
+  // ---- List mode -----------------------------------------------------------
+  if (mode === 'list') {
+    return (
+      <View style={styles.root}>
+        <ScreenHeader
+          title="Expenses"
+          subtitle="All logged costs"
+          onMenu={() => navigation.openDrawer?.()}
+          variant="gradient"
+          rightIcon="add"
+          onRight={openForm}
+        />
+
+        <ScrollView
+          contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 96 }]}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.totalCard}>
+            <View>
+              <Text style={styles.totalCardLabel}>Total Expenses</Text>
+              <Text style={styles.totalCardValue}>Rs. {expensesTotal.toLocaleString()}</Text>
+            </View>
+            <View style={styles.totalCardIcon}>
+              <Ionicons name="receipt" size={22} color={colors.error} />
+            </View>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>History ({allExpenses.length})</Text>
+            {allExpenses.length === 0 ? (
+              <View style={styles.empty}>
+                <Ionicons name="receipt-outline" size={32} color={colors.textMuted} />
+                <Text style={styles.emptyText}>No expenses logged yet.</Text>
+              </View>
+            ) : (
+              allExpenses.map((e, i) => (
+                <View key={e.id} style={[styles.histRow, i === allExpenses.length - 1 && { borderBottomWidth: 0 }]}>
+                  <View style={styles.histIcon}>
+                    <Ionicons name="receipt" size={14} color={colors.warning} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.histDesc} numberOfLines={1}>{e.description}</Text>
+                    <Text style={styles.histMeta}>
+                      {e.category} · {e.date}{e.table ? ` · Table #${e.table}` : ' · General'}
+                    </Text>
+                  </View>
+                  <Text style={styles.histAmt}>- Rs. {(e.amount || 0).toLocaleString()}</Text>
+                </View>
+              ))
+            )}
+          </View>
+        </ScrollView>
+
+        <View style={[styles.footer, { paddingBottom: insets.bottom + 84 }]}>
+          <GradientButton label="Add Expense" icon="add-circle" onPress={openForm} />
+        </View>
+      </View>
+    );
+  }
+
+  // ---- Form mode -----------------------------------------------------------
   return (
     <View style={styles.root}>
       <ScreenHeader
         title="Add Expense"
         subtitle="Log a new cost"
-        onMenu={() => navigation.openDrawer?.()}
+        onBack={() => setMode('list')}
         variant="gradient"
       />
 
@@ -182,38 +241,6 @@ const AddExpenseScreen = ({ navigation, route }) => {
               style={styles.descInput}
             />
           </View>
-
-          {/* Previous expenses */}
-          <View style={styles.section}>
-            <View style={styles.headRow}>
-              <Text style={styles.sectionLabel}>
-                Previous {tableId === NO_TABLE ? 'General' : `Table #${selectedTable?.number}`} Expenses
-              </Text>
-              <View style={styles.totalPill}>
-                <Text style={styles.totalPillText}>Rs. {previousTotal.toLocaleString()}</Text>
-              </View>
-            </View>
-
-            {previous.length === 0 ? (
-              <View style={styles.empty}>
-                <Ionicons name="receipt-outline" size={32} color={colors.textMuted} />
-                <Text style={styles.emptyText}>No previous expenses here.</Text>
-              </View>
-            ) : (
-              previous.map((e, i) => (
-                <View key={e.id} style={[styles.histRow, i === previous.length - 1 && { borderBottomWidth: 0 }]}>
-                  <View style={styles.histIcon}>
-                    <Ionicons name="receipt" size={14} color={colors.warning} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.histDesc} numberOfLines={1}>{e.description}</Text>
-                    <Text style={styles.histMeta}>{e.category} · {e.date}</Text>
-                  </View>
-                  <Text style={styles.histAmt}>- Rs. {e.amount.toLocaleString()}</Text>
-                </View>
-              ))
-            )}
-          </View>
         </ScrollView>
 
         {/* This screen is the "Expense" tab, so the floating tab bar (~74px)
@@ -239,6 +266,25 @@ const styles = StyleSheet.create({
     ...shadows.sm,
   },
   sectionLabel: { ...typography.label, color: colors.primaryDark, marginBottom: spacing.md },
+  totalCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.xl,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.sm,
+  },
+  totalCardLabel: { fontSize: 11, color: colors.textLight, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  totalCardValue: { ...typography.h2, color: colors.error, marginTop: 4 },
+  totalCardIcon: {
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: colors.errorSoft,
+    alignItems: 'center', justifyContent: 'center',
+  },
   fieldHint: {
     ...typography.caption,
     color: colors.textMuted,

@@ -52,8 +52,9 @@ const BookingFormScreen = ({ navigation, route }) => {
 
   const [duration, setDuration] = useState(initialDuration);
   const [isMember, setIsMember] = useState(existing ? existing.isMember !== false : true);
+  // New bookings start with no member selected; editing keeps the existing ones.
   const [members, setMembers] = useState(
-    existing?.members?.slice(0, MAX_MEMBERS) || (memberList[0] ? [memberList[0]] : [])
+    existing?.members?.slice(0, MAX_MEMBERS) || []
   );
   const [guestName, setGuestName] = useState(existing && !existing.isMember ? existing.memberName : '');
   const [guestPhone, setGuestPhone] = useState('');

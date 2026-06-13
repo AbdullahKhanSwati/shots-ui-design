@@ -31,6 +31,7 @@ const AddMemberScreen = ({ navigation }) => {
   const [email, setEmail] = useState('');
   const [idCardNumber, setIdCardNumber] = useState('');
   const [idCardImage, setIdCardImage] = useState(null);
+  const [idCardImageBack, setIdCardImageBack] = useState(null);
   const [memberPhoto, setMemberPhoto] = useState(null);
   const [tier, setTier] = useState('Premium');
   const [duration, setDuration] = useState(membershipDurations[3]); // 1 Year
@@ -121,6 +122,14 @@ const AddMemberScreen = ({ navigation }) => {
           'cnic/',
         );
       }
+      let cnicImageBack = null;
+      if (idCardImageBack?.uri) {
+        cnicImageBack = await uploadToBucket(
+          'member-cnic',
+          { uri: idCardImageBack.uri, name: idCardImageBack.fileName, type: idCardImageBack.mimeType },
+          'cnic/',
+        );
+      }
 
       await addMember({
         id: memberId,
@@ -136,6 +145,7 @@ const AddMemberScreen = ({ navigation }) => {
         totalSpent: Number(price) || 0,
         photo: photoUrl,
         cnicImage,
+        cnicImageBack,
       });
 
       if (price && Number(price) > 0) {
@@ -232,6 +242,7 @@ const AddMemberScreen = ({ navigation }) => {
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>Identity Verification</Text>
 
+            <Text style={styles.fieldLabel}>ID Card — Front</Text>
             <TouchableOpacity
               style={styles.uploadBox}
               activeOpacity={0.85}
@@ -241,7 +252,7 @@ const AddMemberScreen = ({ navigation }) => {
                 <View style={styles.uploadedRow}>
                   <Image source={{ uri: idCardImage.uri }} style={styles.thumbWide} />
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.uploadedTitle}>ID Card Attached</Text>
+                    <Text style={styles.uploadedTitle}>Front Attached</Text>
                     <Text style={styles.uploadedMeta}>Tap to remove</Text>
                   </View>
                   <Ionicons name="close-circle" size={20} color={colors.textMuted} />
@@ -251,7 +262,33 @@ const AddMemberScreen = ({ navigation }) => {
                   <View style={styles.uploadIcon}>
                     <Ionicons name="cloud-upload-outline" size={26} color={colors.primary} />
                   </View>
-                  <Text style={styles.uploadTitle}>Upload ID Card</Text>
+                  <Text style={styles.uploadTitle}>Upload Front</Text>
+                  <Text style={styles.uploadHint}>Tap to capture or pick from gallery</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
+            <Text style={styles.fieldLabel}>ID Card — Back</Text>
+            <TouchableOpacity
+              style={styles.uploadBox}
+              activeOpacity={0.85}
+              onPress={() => (idCardImageBack ? setIdCardImageBack(null) : pickImage(setIdCardImageBack, [16, 10]))}
+            >
+              {idCardImageBack ? (
+                <View style={styles.uploadedRow}>
+                  <Image source={{ uri: idCardImageBack.uri }} style={styles.thumbWide} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.uploadedTitle}>Back Attached</Text>
+                    <Text style={styles.uploadedMeta}>Tap to remove</Text>
+                  </View>
+                  <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+                </View>
+              ) : (
+                <View style={{ alignItems: 'center' }}>
+                  <View style={styles.uploadIcon}>
+                    <Ionicons name="cloud-upload-outline" size={26} color={colors.primary} />
+                  </View>
+                  <Text style={styles.uploadTitle}>Upload Back</Text>
                   <Text style={styles.uploadHint}>Tap to capture or pick from gallery</Text>
                 </View>
               )}

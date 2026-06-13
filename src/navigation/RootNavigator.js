@@ -27,11 +27,12 @@ const Tab = createBottomTabNavigator();
 const Drawer = createDrawerNavigator();
 
 // Same order as the side drawer
+// NOTE: Finance is intentionally hidden from the tab bar for now (the screen
+// and its code are kept — see FinanceScreen / the commented Tab.Screen below).
 const TAB_ICONS = {
   Dashboard:   { active: 'home',    inactive: 'home-outline' },
   Members:     { active: 'people',  inactive: 'people-outline' },
   Bookings:    { active: 'grid',    inactive: 'grid-outline' },
-  Finance:     { active: 'wallet',  inactive: 'wallet-outline' },
   Expense:     { active: 'receipt', inactive: 'receipt-outline' },
 };
 
@@ -90,7 +91,8 @@ const DashboardTabNavigator = () => {
       <Tab.Screen name="Dashboard"   component={DashboardScreen} />
       <Tab.Screen name="Members"     component={MembershipsScreen} />
       <Tab.Screen name="Bookings"    component={TablesScreen} />
-      <Tab.Screen name="Finance"     component={FinanceScreen} />
+      {/* Finance hidden for now — keep the screen, just don't surface the tab.
+      <Tab.Screen name="Finance"     component={FinanceScreen} /> */}
       <Tab.Screen name="Expense"     component={AddExpenseScreen} options={{ title: 'Add' }} />
     </Tab.Navigator>
   );

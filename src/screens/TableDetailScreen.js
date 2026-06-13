@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Image,
   Modal,
@@ -11,6 +12,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import {
@@ -21,12 +23,12 @@ import {
   tableFreeIn,
 } from '../data/mockData';
 import { useShots } from '../store/ShotsStore';
+import { uploadToBucket } from '../lib/supabase';
 import ScreenHeader from '../components/ScreenHeader';
 import GradientButton from '../components/GradientButton';
 
 const STATUSES = [
   { value: 'Available',   label: 'Available',   icon: 'checkmark-circle', color: colors.success },
-  { value: 'Occupied',    label: 'Occupied',    icon: 'time',             color: colors.primary },
   { value: 'Maintenance', label: 'Maintenance', icon: 'construct',        color: colors.warning },
 ];
 
@@ -39,6 +41,7 @@ const TableDetailScreen = ({ navigation, route }) => {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [tick, setTick] = useState(0);
   const [bookingModal, setBookingModal] = useState(null); // { booking } | null
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   useFocusEffect(useCallback(() => { setTick((t) => t + 1); }, []));
 
@@ -56,6 +59,49 @@ const TableDetailScreen = ({ navigation, route }) => {
   const isToday = dKey === dateKey(new Date());
   const nowValue = nowHHMM();
   const freeIn = table ? tableFreeIn(table) : null;
+
+  // Pick a table photo (camera or gallery), upload it, and persist the URL.
+  const launchPicker = async (source) => {
+    try {
+      const opts = { mediaTypes: ['images'], allowsEditing: true, aspect: [16, 10], quality: 0.7 };
+      let result;
+      if (source === 'camera') {
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) return Alert.alert('Permission needed', 'Camera access is required to take a photo.');
+        result = await ImagePicker.launchCameraAsync(opts);
+      } else {
+        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) return Alert.alert('Permission needed', 'Photo library access is required to choose an image.');
+        result = await ImagePicker.launchImageLibraryAsync(opts);
+      }
+      if (result.canceled || !result.assets?.[0]) return;
+      const a = result.assets[0];
+      setUploadingImage(true);
+      const url = await uploadToBucket(
+        'member-photos',
+        { uri: a.uri, name: a.fileName, type: a.mimeType },
+        'tables/',
+      );
+      await updateTable(table.id, { image: url });
+    } catch (e) {
+      Alert.alert('Could not update photo', e?.message || 'Please try again.');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const handlePickImage = () => {
+    if (uploadingImage) return;
+    const options = [
+      { text: 'Take Photo', onPress: () => launchPicker('camera') },
+      { text: 'Choose from Gallery', onPress: () => launchPicker('library') },
+    ];
+    if (table.image) {
+      options.push({ text: 'Remove Photo', style: 'destructive', onPress: () => updateTable(table.id, { image: null }) });
+    }
+    options.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert('Table Photo', 'Add a photo for this table', options);
+  };
 
   const handleEndSession = () => {
     Alert.alert(
@@ -186,8 +232,8 @@ const TableDetailScreen = ({ navigation, route }) => {
         contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 110 }]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Image hero */}
-        <View style={styles.imageWrap}>
+        {/* Image hero — tap to add/change the table photo */}
+        <TouchableOpacity style={styles.imageWrap} activeOpacity={0.9} onPress={handlePickImage}>
           {table.image ? (
             <Image
               source={typeof table.image === 'string' ? { uri: table.image } : table.image}
@@ -216,6 +262,18 @@ const TableDetailScreen = ({ navigation, route }) => {
             </View>
           </View>
 
+          {/* Camera chip + uploading state */}
+          <View style={styles.cameraChip}>
+            {uploadingImage ? (
+              <ActivityIndicator size="small" color={colors.white} />
+            ) : (
+              <Ionicons name="camera" size={16} color={colors.white} />
+            )}
+            <Text style={styles.cameraChipText}>
+              {uploadingImage ? 'Uploading…' : table.image ? 'Change' : 'Add photo'}
+            </Text>
+          </View>
+
           {table.status === 'Occupied' && freeIn ? (
             <View style={styles.occupiedBanner}>
               <View style={{ flex: 1 }}>
@@ -228,7 +286,7 @@ const TableDetailScreen = ({ navigation, route }) => {
               </TouchableOpacity>
             </View>
           ) : null}
-        </View>
+        </TouchableOpacity>
 
         {/* Pricing */}
         <View style={styles.priceCard}>
@@ -477,6 +535,16 @@ const styles = StyleSheet.create({
   },
   statusBadgeDot: { width: 8, height: 8, borderRadius: 4 },
   statusBadgeText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
+  cameraChip: {
+    position: 'absolute',
+    bottom: spacing.md, right: spacing.md,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: spacing.md, paddingVertical: 6,
+    borderRadius: borderRadius.round,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
+  },
+  cameraChipText: { color: colors.white, fontWeight: '800', fontSize: 12 },
   occupiedBanner: {
     position: 'absolute', bottom: spacing.md, left: spacing.md, right: spacing.md,
     backgroundColor: 'rgba(0,0,0,0.7)',

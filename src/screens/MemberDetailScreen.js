@@ -1,6 +1,7 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  Image,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -17,9 +18,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
+import * as Clipboard from 'expo-clipboard';
 import { colors, typography, spacing, borderRadius, shadows } from '../styles/theme';
-import { membershipDurations } from '../data/mockData';
+import { membershipDurations, membershipTiers } from '../data/mockData';
 import { useShots } from '../store/ShotsStore';
+import { signedUrl } from '../lib/supabase';
 import MembershipVirtualCard from '../components/MembershipVirtualCard';
 import ScreenHeader from '../components/ScreenHeader';
 import GradientButton from '../components/GradientButton';
@@ -36,6 +39,25 @@ const MemberDetailScreen = ({ navigation, route }) => {
   const [renewPrice, setRenewPrice] = useState('');
   const [sharing, setSharing] = useState(false);
 
+  // Edit member info
+  const [editOpen, setEditOpen] = useState(false);
+  const [edit, setEdit] = useState({ name: '', phone: '', email: '', idCardNumber: '', type: 'Premium', expiryDate: '' });
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  // Resolve viewable URLs for the (private) ID card images.
+  const [cnicUrls, setCnicUrls] = useState({ front: null, back: null });
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const [front, back] = await Promise.all([
+        signedUrl('member-cnic', member?.cnicImage),
+        signedUrl('member-cnic', member?.cnicImageBack),
+      ]);
+      if (active) setCnicUrls({ front, back });
+    })();
+    return () => { active = false; };
+  }, [member?.cnicImage, member?.cnicImageBack]);
+
   const cardRef = useRef(null);
 
   const captureCard = async () => {
@@ -49,24 +71,27 @@ const MemberDetailScreen = ({ navigation, route }) => {
   const shareMessage = () =>
     `Hello ${member.name}, here is your Shots Members Club card.\n\nMember ID: ${member.id}\nType: ${member.type}\nValid until: ${member.expiryDate}\n\nShow this card or have it scanned at the entrance.`;
 
-  const handleWhatsApp = async () => {
+  // One share button — opens the native share sheet (WhatsApp, Email, etc.)
+  // with the rendered card image attached. The user decides how to send it.
+  const handleShare = async () => {
     try {
       setSharing(true);
       const uri = await captureCard();
       const available = await Sharing.isAvailableAsync();
-      if (!available) {
-        // Fallback: open a text-only WhatsApp chat
-        const num = (member.phone || '').replace(/[^\d]/g, '');
-        if (!num) throw new Error('Sharing not supported and no phone on file.');
-        await Linking.openURL(`whatsapp://send?phone=${num}&text=${encodeURIComponent(shareMessage())}`);
-        return;
+      if (available) {
+        await Sharing.shareAsync(uri, {
+          mimeType: 'image/png',
+          dialogTitle: `Share ${member.name}'s membership card`,
+          UTI: 'public.png',
+        });
+      } else {
+        // Fallback: text-only mailto if a share sheet isn't available.
+        const url = member.email
+          ? `mailto:${member.email}?subject=${encodeURIComponent('Your Shots Members Club card')}&body=${encodeURIComponent(shareMessage())}`
+          : null;
+        if (url) await Linking.openURL(url);
+        else throw new Error('Sharing is not available on this device.');
       }
-      // Native share sheet — user picks WhatsApp and the image is attached.
-      await Sharing.shareAsync(uri, {
-        mimeType: 'image/png',
-        dialogTitle: `Send ${member.name}'s membership card`,
-        UTI: 'public.png',
-      });
     } catch (e) {
       Alert.alert('Could not share card', e?.message || 'Try again in a moment.');
     } finally {
@@ -74,30 +99,58 @@ const MemberDetailScreen = ({ navigation, route }) => {
     }
   };
 
-  const handleEmail = async () => {
-    if (!member.email) {
-      return Alert.alert('No email', 'This member has no email on file.');
+  const copyValue = async (label, value) => {
+    if (!value) {
+      return Alert.alert(`No ${label.toLowerCase()}`, `This member has no ${label.toLowerCase()} on file.`);
     }
+    await Clipboard.setStringAsync(String(value));
+    Alert.alert('Copied', `${label} copied to clipboard.`);
+  };
+
+  const openEdit = () => {
+    setEdit({
+      name: member.name || '',
+      phone: member.phone || '',
+      email: member.email || '',
+      idCardNumber: member.idCardNumber || '',
+      type: member.type || 'Premium',
+      expiryDate: member.expiryDate || '',
+    });
+    setEditOpen(true);
+  };
+
+  // Extend the editable expiry by 1 year (from today or current expiry, whichever is later).
+  const extendEditOneYear = () => {
+    const cur = edit.expiryDate ? new Date(edit.expiryDate) : new Date();
+    const base = cur > new Date() ? new Date(cur) : new Date();
+    base.setFullYear(base.getFullYear() + 1);
+    setEdit((s) => ({ ...s, expiryDate: base.toISOString().slice(0, 10) }));
+  };
+
+  const saveEdit = async () => {
+    if (!edit.name || !edit.phone) {
+      return Alert.alert('Missing info', 'Name and phone are required.');
+    }
+    if (savingEdit) return;
+    setSavingEdit(true);
     try {
-      setSharing(true);
-      const uri = await captureCard();
-      const available = await Sharing.isAvailableAsync();
-      if (available) {
-        // Share sheet — user picks Gmail/Mail and the image is attached.
-        await Sharing.shareAsync(uri, {
-          mimeType: 'image/png',
-          dialogTitle: `Email ${member.name}'s membership card`,
-          UTI: 'public.png',
-        });
-      } else {
-        // Fallback: plain mailto (no attachment possible via mailto)
-        const url = `mailto:${member.email}?subject=${encodeURIComponent('Your Shots Members Club card')}&body=${encodeURIComponent(shareMessage())}`;
-        await Linking.openURL(url);
+      const patch = {
+        name: edit.name,
+        phone: edit.phone,
+        email: edit.email || null,
+        idCardNumber: edit.idCardNumber,
+        type: edit.type,
+      };
+      if (edit.expiryDate) {
+        patch.expiryDate = edit.expiryDate;
+        patch.status = new Date(edit.expiryDate) >= new Date() ? 'Active' : 'Expired';
       }
+      await updateMember(member.id, patch);
+      setEditOpen(false);
     } catch (e) {
-      Alert.alert('Could not send card', e?.message || 'Try again in a moment.');
+      Alert.alert('Could not save changes', e?.message || 'Please try again.');
     } finally {
-      setSharing(false);
+      setSavingEdit(false);
     }
   };
 
@@ -189,7 +242,8 @@ const MemberDetailScreen = ({ navigation, route }) => {
         subtitle={member.id}
         onBack={() => navigation.goBack()}
         variant="gradient"
-        rightIcon="ellipsis-horizontal"
+        rightIcon="create-outline"
+        onRight={openEdit}
       />
 
       <ScrollView
@@ -200,25 +254,36 @@ const MemberDetailScreen = ({ navigation, route }) => {
           <MembershipVirtualCard member={member} />
         </View>
 
-        {/* Share card */}
-        <View style={styles.shareRow}>
+        {/* Share card — one button, native share sheet */}
+        <TouchableOpacity
+          onPress={handleShare}
+          disabled={sharing}
+          style={[styles.shareBtn, sharing && styles.shareBtnDisabled]}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="share-social" size={18} color={colors.primary} />
+          <Text style={styles.shareText}>{sharing ? 'Preparing…' : 'Share Card'}</Text>
+        </TouchableOpacity>
+
+        {/* Copy contact details to populate a message manually */}
+        <View style={styles.copyRow}>
           <TouchableOpacity
-            onPress={handleWhatsApp}
-            disabled={sharing}
-            style={[styles.shareBtn, styles.shareWa, sharing && styles.shareBtnDisabled]}
+            onPress={() => copyValue('Phone', member.phone)}
+            style={styles.copyBtn}
             activeOpacity={0.85}
           >
-            <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
-            <Text style={styles.shareText}>{sharing ? 'Preparing…' : 'Send via WhatsApp'}</Text>
+            <Ionicons name="call-outline" size={16} color={colors.text} />
+            <Text style={styles.copyText} numberOfLines={1}>Copy Phone</Text>
+            <Ionicons name="copy-outline" size={14} color={colors.textLight} />
           </TouchableOpacity>
           <TouchableOpacity
-            onPress={handleEmail}
-            disabled={sharing}
-            style={[styles.shareBtn, styles.shareMail, sharing && styles.shareBtnDisabled]}
+            onPress={() => copyValue('Email', member.email)}
+            style={styles.copyBtn}
             activeOpacity={0.85}
           >
-            <Ionicons name="mail" size={18} color={colors.primary} />
-            <Text style={styles.shareText}>{sharing ? 'Preparing…' : 'Send via Email'}</Text>
+            <Ionicons name="mail-outline" size={16} color={colors.text} />
+            <Text style={styles.copyText} numberOfLines={1}>Copy Email</Text>
+            <Ionicons name="copy-outline" size={14} color={colors.textLight} />
           </TouchableOpacity>
         </View>
 
@@ -235,6 +300,22 @@ const MemberDetailScreen = ({ navigation, route }) => {
           <InfoRow icon="call" label="Phone" value={member.phone} />
           <InfoRow icon="calendar-outline" label="Joined" value={member.joinDate} />
           <InfoRow icon="time-outline" label="Expires" value={member.expiryDate} isLast />
+        </View>
+
+        {/* ID card images */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>ID Card</Text>
+          {(cnicUrls.front || cnicUrls.back) ? (
+            <View style={styles.idCardRow}>
+              <IdCardView label="Front" url={cnicUrls.front} />
+              <IdCardView label="Back" url={cnicUrls.back} />
+            </View>
+          ) : (
+            <View style={styles.empty}>
+              <Ionicons name="card-outline" size={32} color={colors.textMuted} />
+              <Text style={styles.emptyText}>No ID card images on file</Text>
+            </View>
+          )}
         </View>
 
         <View style={styles.section}>
@@ -335,6 +416,102 @@ const MemberDetailScreen = ({ navigation, route }) => {
           </KeyboardAvoidingView>
         </View>
       </Modal>
+
+      {/* Edit member info */}
+      <Modal visible={editOpen} transparent animationType="slide" onRequestClose={() => setEditOpen(false)}>
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%' }}>
+            <View style={[styles.modalCard, { paddingBottom: insets.bottom + spacing.md }]}>
+              <View style={styles.modalHandle} />
+              <View style={styles.modalHead}>
+                <View>
+                  <Text style={styles.modalTitle}>Edit Member</Text>
+                  <Text style={styles.modalSub}>{member.id}</Text>
+                </View>
+                <TouchableOpacity onPress={() => setEditOpen(false)} hitSlop={10}>
+                  <Ionicons name="close-circle" size={24} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.fieldLabel}>Full Name</Text>
+              <TextInput
+                value={edit.name}
+                onChangeText={(v) => setEdit((s) => ({ ...s, name: v }))}
+                placeholder="Member name"
+                placeholderTextColor={colors.textMuted}
+                style={styles.editInput}
+              />
+
+              <Text style={styles.fieldLabel}>Phone</Text>
+              <TextInput
+                value={edit.phone}
+                onChangeText={(v) => setEdit((s) => ({ ...s, phone: v }))}
+                placeholder="+92 300 1234567"
+                placeholderTextColor={colors.textMuted}
+                keyboardType="phone-pad"
+                style={styles.editInput}
+              />
+
+              <Text style={styles.fieldLabel}>Email</Text>
+              <TextInput
+                value={edit.email}
+                onChangeText={(v) => setEdit((s) => ({ ...s, email: v }))}
+                placeholder="member@example.com"
+                placeholderTextColor={colors.textMuted}
+                autoCapitalize="none"
+                keyboardType="email-address"
+                style={styles.editInput}
+              />
+
+              <Text style={styles.fieldLabel}>CNIC</Text>
+              <TextInput
+                value={edit.idCardNumber}
+                onChangeText={(v) => setEdit((s) => ({ ...s, idCardNumber: v }))}
+                placeholder="35202-1234567-1"
+                placeholderTextColor={colors.textMuted}
+                keyboardType="number-pad"
+                style={styles.editInput}
+              />
+
+              <Text style={styles.fieldLabel}>Membership Tier</Text>
+              <View style={styles.durationRow}>
+                {membershipTiers.map((t) => (
+                  <Pressable
+                    key={t}
+                    onPress={() => setEdit((s) => ({ ...s, type: t }))}
+                    style={[styles.duration, edit.type === t && styles.durationActive]}
+                  >
+                    <Text style={[styles.durationText, edit.type === t && { color: colors.white }]}>{t}</Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <Text style={styles.fieldLabel}>Expiry Date (YYYY-MM-DD)</Text>
+              <TextInput
+                value={edit.expiryDate}
+                onChangeText={(v) => setEdit((s) => ({ ...s, expiryDate: v }))}
+                placeholder="2027-06-13"
+                placeholderTextColor={colors.textMuted}
+                style={styles.editInput}
+              />
+              <TouchableOpacity onPress={extendEditOneYear} style={styles.extendBtn} activeOpacity={0.85}>
+                <Ionicons name="calendar" size={16} color={colors.primary} />
+                <Text style={styles.extendBtnText}>Extend 1 year</Text>
+              </TouchableOpacity>
+
+              <View style={{ marginTop: spacing.lg }}>
+                <GradientButton
+                  label="Save Changes"
+                  icon="checkmark-circle"
+                  onPress={saveEdit}
+                  loading={savingEdit}
+                  disabled={savingEdit}
+                />
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -359,17 +536,27 @@ const InfoRow = ({ icon, label, value, isLast }) => (
   </View>
 );
 
+const IdCardView = ({ label, url }) => (
+  <View style={{ flex: 1 }}>
+    <Text style={styles.idCardLabel}>{label}</Text>
+    {url ? (
+      <TouchableOpacity activeOpacity={0.9} onPress={() => Linking.openURL(url)}>
+        <Image source={{ uri: url }} style={styles.idCardThumb} resizeMode="cover" />
+      </TouchableOpacity>
+    ) : (
+      <View style={[styles.idCardThumb, styles.idCardEmpty]}>
+        <Ionicons name="image-outline" size={22} color={colors.textMuted} />
+        <Text style={styles.idCardEmptyText}>Not uploaded</Text>
+      </View>
+    )}
+  </View>
+);
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background },
   scroll: { padding: spacing.lg },
   cardWrap: { marginBottom: spacing.md },
-  shareRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.lg,
-  },
   shareBtn: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -377,13 +564,31 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     borderRadius: borderRadius.lg,
     borderWidth: 1.5,
+    borderColor: colors.primary,
     backgroundColor: colors.surface,
+    marginBottom: spacing.sm,
     ...shadows.xs,
   },
-  shareWa: { borderColor: '#25D366' },
-  shareMail: { borderColor: colors.primary },
   shareText: { ...typography.bodySmall, color: colors.text, fontWeight: '700' },
   shareBtnDisabled: { opacity: 0.55 },
+  copyRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  copyBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
+  },
+  copyText: { ...typography.caption, color: colors.text, fontWeight: '700', textTransform: 'none', letterSpacing: 0 },
   statRow: {
     flexDirection: 'row',
     gap: spacing.sm,
@@ -436,6 +641,23 @@ const styles = StyleSheet.create({
   },
   infoLabel: { ...typography.bodySmall, color: colors.textLight, width: 80 },
   infoValue: { flex: 1, ...typography.bodySmall, color: colors.text, fontWeight: '700', textAlign: 'right' },
+  idCardRow: { flexDirection: 'row', gap: spacing.md },
+  idCardLabel: { ...typography.caption, color: colors.textLight, fontWeight: '700', marginBottom: spacing.xs },
+  idCardThumb: {
+    width: '100%', height: 110,
+    borderRadius: borderRadius.md,
+    borderWidth: 1, borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
+  },
+  idCardEmpty: { alignItems: 'center', justifyContent: 'center', gap: 4 },
+  idCardEmptyText: { ...typography.caption, color: colors.textMuted, textTransform: 'none', letterSpacing: 0 },
+  extendBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    marginTop: spacing.sm, paddingVertical: spacing.sm + 2,
+    borderRadius: borderRadius.lg, borderWidth: 1.5, borderColor: colors.primary,
+    backgroundColor: colors.surface,
+  },
+  extendBtnText: { ...typography.bodySmall, color: colors.primary, fontWeight: '800' },
   empty: { alignItems: 'center', padding: spacing.lg, gap: spacing.sm },
   emptyText: { ...typography.bodySmall, color: colors.textLight },
   visitRow: {
@@ -548,6 +770,17 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   fieldHint: { ...typography.caption, color: colors.textMuted, textTransform: 'none', letterSpacing: 0, marginTop: 4 },
+  editInput: {
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.md,
+    height: 48,
+    ...typography.body,
+    color: colors.text,
+    paddingVertical: 0,
+  },
 });
 
 export default MemberDetailScreen;

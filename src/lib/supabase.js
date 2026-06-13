@@ -29,6 +29,19 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
  * pickers return). On React Native we upload via FormData so the binary is sent
  * correctly.
  */
+/**
+ * Resolve a viewable URL for a stored image reference.
+ *  - already a full URL (public bucket) → returned as-is
+ *  - a Storage object path in a private bucket → a temporary signed URL
+ */
+export async function signedUrl(bucket, pathOrUrl, expiresIn = 3600) {
+  if (!pathOrUrl) return null;
+  if (/^https?:\/\//.test(pathOrUrl)) return pathOrUrl;
+  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(pathOrUrl, expiresIn);
+  if (error) { console.error('signedUrl', error); return null; }
+  return data?.signedUrl || null;
+}
+
 export async function uploadToBucket(bucket, file, prefix = '') {
   const name = file.name || file.uri?.split('/').pop() || 'upload.jpg';
   const ext = (name.split('.').pop() || 'jpg').toLowerCase();

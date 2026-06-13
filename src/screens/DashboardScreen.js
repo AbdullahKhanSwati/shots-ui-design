@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Pressable,
@@ -11,15 +11,30 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { colors, gradients, typography, spacing, borderRadius, shadows } from '../styles/theme';
-import { getMTDFinance, dateKey } from '../data/mockData';
+import { dateKey, timeframeRange } from '../data/mockData';
 import { useShots } from '../store/ShotsStore';
 import StatCard from '../components/StatCard';
+
+const TIMEFRAMES = [
+  { key: 'today', label: 'Today' },
+  { key: 'week', label: 'This Week' },
+  { key: 'mtd', label: 'This Month' },
+  { key: 'lastMonth', label: 'Last Month' },
+  { key: 'year', label: 'This Year' },
+  { key: 'all', label: 'All Time' },
+];
 
 const DashboardScreen = ({ navigation }) => {
   const insets = useSafeAreaInsets();
   const { bookings, finance, members } = useShots();
   const fade = useRef(new Animated.Value(0)).current;
+
+  // Overview timeframe — defaults to month-to-date and resets to it every time
+  // the Dashboard regains focus.
+  const [timeframe, setTimeframe] = useState('mtd');
+  useFocusEffect(useCallback(() => { setTimeframe('mtd'); }, []));
 
   useEffect(() => {
     Animated.timing(fade, { toValue: 1, duration: 400, useNativeDriver: true }).start();
@@ -29,21 +44,37 @@ const DashboardScreen = ({ navigation }) => {
   const todayLabel = todayDate.toLocaleDateString('en-US', {
     weekday: 'long', month: 'long', day: 'numeric',
   });
-  const monthLabel = todayDate.toLocaleDateString('en-US', { month: 'long' });
+  const timeframeLabel = TIMEFRAMES.find((t) => t.key === timeframe)?.label || 'This Month';
 
-  // Today's calculations
+  // Today's calculations (hero)
   const todayKey = dateKey(todayDate);
   const todayBookings = bookings.filter((b) => b.date === todayKey).length;
   const todayRevenue = bookings
     .filter((b) => b.date === todayKey)
     .reduce((s, b) => s + (b.amount || 0), 0);
 
-  // Month-to-date calculations
-  const mtd = useMemo(() => getMTDFinance(finance, todayDate), [finance]);
-  const mtdRevenue = mtd.filter((f) => f.type === 'In').reduce((s, f) => s + (f.amount || 0), 0);
-  const mtdExpenses = mtd.filter((f) => f.type === 'Out').reduce((s, f) => s + (f.amount || 0), 0);
-  const mtdNet = mtdRevenue - mtdExpenses;
-  const activeMembers = members.filter((m) => m.status === 'Active').length;
+  // Overview — computed for the selected timeframe.
+  const overview = useMemo(() => {
+    const range = timeframeRange(timeframe, todayDate);
+    const inRange = (d) => !range || (d >= range.start && d <= range.end);
+
+    const membershipRevenue = finance
+      .filter((f) => f.type === 'In' && f.category === 'Membership' && inRange(f.date))
+      .reduce((s, f) => s + (f.amount || 0), 0);
+    const bookingRevenue = bookings
+      .filter((b) => b.status !== 'Cancelled' && inRange(b.date))
+      .reduce((s, b) => s + (b.amount || 0), 0);
+    const expenses = finance
+      .filter((f) => f.type === 'Out' && inRange(f.date))
+      .reduce((s, f) => s + (f.amount || 0), 0);
+    return {
+      membershipRevenue,
+      bookingRevenue,
+      expenses,
+      net: membershipRevenue + bookingRevenue - expenses,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeframe, finance, bookings]);
 
   return (
     <View style={styles.root}>
@@ -85,7 +116,7 @@ const DashboardScreen = ({ navigation }) => {
         contentContainerStyle={[styles.scrollContent, { paddingBottom: spacing.xxl + 80 }]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Quick actions — same order as the side drawer (Members, Bookings, Finance, Add Expense) */}
+        {/* Quick actions */}
         <View style={styles.quickRow}>
           <QuickAction
             icon="people"
@@ -102,13 +133,6 @@ const DashboardScreen = ({ navigation }) => {
             onPress={() => navigation.navigate('Bookings')}
           />
           <QuickAction
-            icon="wallet"
-            label="Finance"
-            colorFrom="#FF6B6B"
-            colorTo="#E53E3E"
-            onPress={() => navigation.navigate('Finance')}
-          />
-          <QuickAction
             icon="receipt"
             label="Add Expense"
             colorFrom="#F4B860"
@@ -117,43 +141,64 @@ const DashboardScreen = ({ navigation }) => {
           />
         </View>
 
-        {/* Overview — Month-to-date */}
+        {/* Overview — filterable by timeframe (defaults to this month) */}
         <View style={styles.section}>
           <View style={styles.sectionHead}>
             <Text style={styles.sectionTitle}>Overview</Text>
             <View style={styles.mtdPill}>
               <Ionicons name="calendar-outline" size={11} color={colors.primaryDark} />
-              <Text style={styles.mtdPillText}>{monthLabel} · to date</Text>
+              <Text style={styles.mtdPillText}>{timeframeLabel}</Text>
             </View>
           </View>
 
+          {/* Timeframe filter */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.tfRow}
+          >
+            {TIMEFRAMES.map((t) => {
+              const active = timeframe === t.key;
+              return (
+                <TouchableOpacity
+                  key={t.key}
+                  onPress={() => setTimeframe(t.key)}
+                  activeOpacity={0.85}
+                  style={[styles.tfChip, active && styles.tfChipActive]}
+                >
+                  <Text style={[styles.tfChipText, active && styles.tfChipTextActive]}>{t.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
           <View style={styles.statsGrid}>
             <StatCard
-              label="MTD Revenue"
-              value={`Rs. ${mtdRevenue.toLocaleString()}`}
-              icon="trending-up"
-              color={colors.success}
+              label="Membership Revenue"
+              value={`Rs. ${overview.membershipRevenue.toLocaleString()}`}
+              icon="diamond"
+              color={colors.primary}
               delay={0}
             />
             <StatCard
-              label="MTD Expenses"
-              value={`Rs. ${mtdExpenses.toLocaleString()}`}
-              icon="trending-down"
-              color={colors.error}
+              label="Booking Revenue"
+              value={`Rs. ${overview.bookingRevenue.toLocaleString()}`}
+              icon="grid"
+              color={colors.success}
               delay={80}
             />
             <StatCard
-              label="MTD Net Profit"
-              value={`Rs. ${mtdNet.toLocaleString()}`}
-              icon="cash"
-              color={mtdNet >= 0 ? colors.success : colors.error}
+              label="Expenses"
+              value={`Rs. ${overview.expenses.toLocaleString()}`}
+              icon="trending-down"
+              color={colors.error}
               delay={160}
             />
             <StatCard
-              label="Active Members"
-              value={activeMembers}
-              icon="people"
-              color={colors.primary}
+              label="Net Profit"
+              value={`Rs. ${overview.net.toLocaleString()}`}
+              icon="cash"
+              color={overview.net >= 0 ? colors.success : colors.error}
               delay={240}
             />
           </View>
@@ -260,6 +305,18 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   mtdPillText: { ...typography.caption, color: colors.primaryDark, fontWeight: '800' },
+  tfRow: { gap: spacing.sm, paddingBottom: spacing.md, paddingRight: 4 },
+  tfChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.round,
+    backgroundColor: colors.surface,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+  },
+  tfChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  tfChipText: { ...typography.caption, color: colors.textLight, fontWeight: '700', textTransform: 'none', letterSpacing: 0 },
+  tfChipTextActive: { color: colors.white },
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
 });
 

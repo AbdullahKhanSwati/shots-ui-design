@@ -150,6 +150,37 @@ export function getMonthFinance(finance = [], year, month) {
   return finance.filter((f) => isInMonth(f.date, year, month));
 }
 
+// Returns an inclusive { start, end } date-key range for a named timeframe,
+// or null for "all time" (no bounds). Used by the Dashboard overview filter.
+export function timeframeRange(key, refDate = new Date()) {
+  const ref = new Date(refDate); ref.setHours(0, 0, 0, 0);
+  switch (key) {
+    case 'today':
+      return { start: dateKey(ref), end: dateKey(ref) };
+    case 'week': {
+      const dow = (ref.getDay() + 6) % 7; // Monday = 0
+      const start = new Date(ref); start.setDate(ref.getDate() - dow);
+      return { start: dateKey(start), end: dateKey(ref) };
+    }
+    case 'mtd': {
+      const start = new Date(ref.getFullYear(), ref.getMonth(), 1);
+      return { start: dateKey(start), end: dateKey(ref) };
+    }
+    case 'lastMonth': {
+      const start = new Date(ref.getFullYear(), ref.getMonth() - 1, 1);
+      const end = new Date(ref.getFullYear(), ref.getMonth(), 0); // last day of prev month
+      return { start: dateKey(start), end: dateKey(end) };
+    }
+    case 'year': {
+      const start = new Date(ref.getFullYear(), 0, 1);
+      return { start: dateKey(start), end: dateKey(ref) };
+    }
+    case 'all':
+    default:
+      return null;
+  }
+}
+
 export function previousMonths(count = 12) {
   const out = [];
   const now = new Date();

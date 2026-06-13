@@ -20,7 +20,6 @@ import FilterChips from '../components/FilterChips';
 const STATUS_OPTIONS = [
   { value: 'All', label: 'All', icon: 'apps' },
   { value: 'Available', label: 'Available', icon: 'checkmark-circle' },
-  { value: 'Occupied', label: 'Occupied', icon: 'time' },
   { value: 'Maintenance', label: 'Maintenance', icon: 'construct' },
 ];
 const TYPE_OPTIONS = [
@@ -86,9 +85,7 @@ const TablesScreen = ({ navigation }) => {
             <Ionicons name="menu" size={20} color={colors.white} />
           </TouchableOpacity>
           <Text style={styles.heroTitle}>Bookings</Text>
-          <TouchableOpacity style={styles.iconBtn} hitSlop={10}>
-            <Ionicons name="options-outline" size={18} color={colors.white} />
-          </TouchableOpacity>
+          <View style={styles.iconBtnSpacer} />
         </View>
 
         <View style={styles.tabsRow}>
@@ -238,6 +235,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.18)',
     alignItems: 'center', justifyContent: 'center',
   },
+  iconBtnSpacer: { width: 38, height: 38 },
   heroTitle: { ...typography.h3, color: colors.white },
   tabsRow: {
     flexDirection: 'row',

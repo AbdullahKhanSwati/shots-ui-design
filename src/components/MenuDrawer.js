@@ -32,12 +32,7 @@ const MenuDrawer = ({ navigation }) => {
         { icon: 'home-outline', label: 'Dashboard', onPress: () => navigation.navigate('MainTabs', { screen: 'Dashboard' }) },
         { icon: 'people-outline', label: 'Memberships', onPress: () => navigation.navigate('MainTabs', { screen: 'Members' }) },
         { icon: 'grid-outline', label: 'Bookings', onPress: () => navigation.navigate('MainTabs', { screen: 'Bookings' }) },
-        { icon: 'wallet-outline', label: 'Finance', onPress: () => navigation.navigate('MainTabs', { screen: 'Finance' }) },
-      ],
-    },
-    {
-      title: 'Quick Actions',
-      items: [
+        // Finance hidden for now (kept in code).
         { icon: 'cash-outline', label: 'Add Expense', onPress: () => navigation.navigate('MainTabs', { screen: 'Expense' }) },
       ],
     },
