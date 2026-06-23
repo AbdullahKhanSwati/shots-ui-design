@@ -93,10 +93,8 @@ const DashboardScreen = ({ navigation }) => {
           <View style={{ flex: 1, alignItems: 'center' }}>
             <Text style={styles.heroBrand}>SHOTS</Text>
           </View>
-          <TouchableOpacity style={styles.iconBtnGlass} hitSlop={10}>
-            <Ionicons name="notifications-outline" size={18} color={colors.white} />
-            <View style={styles.notifDot} />
-          </TouchableOpacity>
+          {/* Spacer keeps the brand centered now that the (non-functional) bell is gone */}
+          <View style={{ width: 38, height: 38 }} />
         </View>
 
         <Animated.View style={{ opacity: fade }}>

@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,7 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, gradients, typography, spacing, borderRadius, shadows } from '../styles/theme';
-import { sortBookingsByTableThenTime, dateKey } from '../data/mockData';
+import { dateKey } from '../data/mockData';
 import { useShots } from '../store/ShotsStore';
 import TableCard from '../components/TableCard';
 import SearchBar from '../components/SearchBar';
@@ -30,7 +31,7 @@ const TYPE_OPTIONS = [
 
 const TablesScreen = ({ navigation }) => {
   const insets = useSafeAreaInsets();
-  const { tables, bookings } = useShots();
+  const { tables, bookings, updateBooking } = useShots();
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('All');
   const [type, setType] = useState('All');
@@ -57,25 +58,63 @@ const TablesScreen = ({ navigation }) => {
     });
   }, [tables, query, status, type]);
 
-  // Today's bookings — grouped by table, sorted by time within each table
+  // Today's + all upcoming bookings — grouped by date, sorted by time then table.
   const grouped = useMemo(() => {
     const todayKey = dateKey(new Date());
-    const todayList = bookings.filter((b) => b.date === todayKey);
-    const sorted = sortBookingsByTableThenTime(todayList);
+    const upcoming = bookings.filter((b) => b.date >= todayKey);
+    const sorted = [...upcoming].sort(
+      (a, b) =>
+        a.date.localeCompare(b.date) ||
+        a.start.localeCompare(b.start) ||
+        a.tableNumber - b.tableNumber
+    );
     const map = new Map();
     sorted.forEach((b) => {
-      if (!map.has(b.tableId)) map.set(b.tableId, []);
-      map.get(b.tableId).push(b);
+      if (!map.has(b.date)) map.set(b.date, []);
+      map.get(b.date).push(b);
     });
-    return Array.from(map.entries()); // [[tableId, bookings], ...]
+    return Array.from(map.entries()); // [[dateKey, bookings], ...]
   }, [bookings, tick]);
 
-  const totalRevenue = useMemo(() => {
-    const todayKey = dateKey(new Date());
-    return bookings
-      .filter((b) => b.date === todayKey)
-      .reduce((s, b) => s + (b.amount || 0), 0);
-  }, [bookings, tick]);
+  // Counts/revenue across the shown range, excluding cancelled bookings.
+  const liveBookings = useMemo(
+    () => grouped.flatMap(([, list]) => list).filter((b) => b.status !== 'Cancelled'),
+    [grouped]
+  );
+  const totalRevenue = useMemo(
+    () => liveBookings.reduce((s, b) => s + (b.amount || 0), 0),
+    [liveBookings]
+  );
+
+  const dayLabel = (key) => {
+    const today = dateKey(new Date());
+    const tomorrow = dateKey(new Date(Date.now() + 86400000));
+    if (key === today) return 'Today';
+    if (key === tomorrow) return 'Tomorrow';
+    return new Date(key).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' });
+  };
+
+  const confirmCancel = (b) => {
+    Alert.alert(
+      'Cancel booking?',
+      `Mark ${b.memberName || 'this'} booking on Table #${b.tableNumber} (${b.start}–${b.end}) as cancelled? It stays in your records as Cancelled and frees the slot.`,
+      [
+        { text: 'Keep booking', style: 'cancel' },
+        {
+          text: 'Cancel booking',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await updateBooking(b.id, { status: 'Cancelled' });
+              setTick((t) => t + 1);
+            } catch (e) {
+              Alert.alert('Could not cancel', e?.message || 'Please try again.');
+            }
+          },
+        },
+      ]
+    );
+  };
 
   return (
     <View style={styles.root}>
@@ -139,62 +178,88 @@ const TablesScreen = ({ navigation }) => {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.bookingSummary}>
-            <SummaryItem icon="grid" label="Tables" value={grouped.length} color={colors.primary} />
-            <SummaryItem icon="checkmark-done" label="Bookings" value={grouped.reduce((s, [, list]) => s + list.length, 0)} color={colors.success} />
+            <SummaryItem icon="calendar" label="Days" value={grouped.length} color={colors.primary} />
+            <SummaryItem icon="checkmark-done" label="Bookings" value={liveBookings.length} color={colors.success} />
             <SummaryItem icon="cash" label="Revenue" value={`Rs. ${totalRevenue.toLocaleString()}`} color={colors.warning} />
           </View>
 
           {grouped.length === 0 ? (
             <View style={styles.empty}>
               <Ionicons name="calendar-outline" size={48} color={colors.textMuted} />
-              <Text style={styles.emptyText}>No bookings today</Text>
+              <Text style={styles.emptyText}>No upcoming bookings</Text>
             </View>
           ) : (
-            grouped.map(([tableId, list]) => (
-              <View key={tableId} style={{ marginBottom: spacing.md }}>
+            grouped.map(([dKey, list]) => (
+              <View key={dKey} style={{ marginBottom: spacing.md }}>
                 <View style={styles.groupHeader}>
                   <View style={styles.groupBubble}>
-                    <Text style={styles.groupBubbleText}>T{list[0].tableNumber}</Text>
+                    <Ionicons name="calendar" size={14} color={colors.primaryDark} />
                   </View>
-                  <Text style={styles.groupTitle}>Table #{list[0].tableNumber}</Text>
+                  <Text style={styles.groupTitle}>{dayLabel(dKey)}</Text>
                   <View style={styles.groupCount}>
                     <Text style={styles.groupCountText}>{list.length}</Text>
                   </View>
                 </View>
 
-                {list.map((b) => (
-                  <TouchableOpacity
-                    key={b.id}
-                    activeOpacity={0.85}
-                    onPress={() => navigation.navigate('TableDetail', { tableId: b.tableId })}
-                    style={styles.bookingCard}
-                  >
-                    <View style={[styles.bookingTime, b.status === 'Active' && { backgroundColor: colors.successSoft }]}>
-                      <Text style={[styles.bookingTimeText, b.status === 'Active' && { color: colors.success }]}>{b.start}</Text>
-                      <Text style={[styles.bookingTimeText, b.status === 'Active' && { color: colors.success }, { fontSize: 10 }]}>{b.end}</Text>
-                    </View>
-                    <View style={{ flex: 1, marginLeft: spacing.md }}>
-                      <View style={styles.bookingTitleRow}>
-                        <Text style={styles.bookingName} numberOfLines={1}>{b.memberName}</Text>
-                        <View style={[styles.statusPill, b.status === 'Active' ? styles.pillActive : styles.pillDone]}>
-                          <Text style={[styles.statusPillText, { color: b.status === 'Active' ? colors.success : colors.textLight }]}>
-                            {b.status}
+                {list.map((b) => {
+                  const cancelled = b.status === 'Cancelled';
+                  return (
+                    <TouchableOpacity
+                      key={b.id}
+                      activeOpacity={0.85}
+                      onPress={() => navigation.navigate('TableDetail', { tableId: b.tableId })}
+                      style={[styles.bookingCard, cancelled && styles.bookingCardCancelled]}
+                    >
+                      <View style={[
+                        styles.bookingTime,
+                        b.status === 'Active' && { backgroundColor: colors.successSoft },
+                        cancelled && { backgroundColor: colors.surfaceAlt },
+                      ]}>
+                        <Text style={[styles.bookingTimeText, b.status === 'Active' && { color: colors.success }, cancelled && { color: colors.textMuted }]}>{b.start}</Text>
+                        <Text style={[styles.bookingTimeText, b.status === 'Active' && { color: colors.success }, cancelled && { color: colors.textMuted }, { fontSize: 10 }]}>{b.end}</Text>
+                      </View>
+                      <View style={{ flex: 1, marginLeft: spacing.md }}>
+                        <View style={styles.bookingTitleRow}>
+                          <Text style={[styles.bookingName, cancelled && styles.cancelledText]} numberOfLines={1}>
+                            T#{b.tableNumber} · {b.memberName}
                           </Text>
+                          <View style={[
+                            styles.statusPill,
+                            b.status === 'Active' ? styles.pillActive : styles.pillDone,
+                            cancelled && styles.pillCancelled,
+                          ]}>
+                            <Text style={[styles.statusPillText, { color: cancelled ? colors.error : b.status === 'Active' ? colors.success : colors.textLight }]}>
+                              {b.status}
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={styles.bookingMeta}>
+                          <Ionicons name="people" size={11} color={colors.textLight} />
+                          <Text style={styles.bookingMetaText}>
+                            {b.members?.length || 1} {(b.members?.length || 1) > 1 ? 'players' : 'player'}
+                          </Text>
+                          <Text style={styles.bookingDot}>•</Text>
+                          <Ionicons name={b.isMember ? 'diamond' : 'person'} size={11} color={colors.textLight} />
+                          <Text style={styles.bookingMetaText}>{b.isMember ? 'Member' : 'Guest'}</Text>
+                        </View>
+                        <View style={styles.bookingFootRow}>
+                          <Text style={[styles.bookingAmt, cancelled && styles.cancelledText]}>Rs. {(b.amount || 0).toLocaleString()}</Text>
+                          {!cancelled ? (
+                            <TouchableOpacity
+                              onPress={() => confirmCancel(b)}
+                              style={styles.cancelChip}
+                              hitSlop={8}
+                              activeOpacity={0.85}
+                            >
+                              <Ionicons name="close-circle-outline" size={14} color={colors.error} />
+                              <Text style={styles.cancelChipText}>Cancel</Text>
+                            </TouchableOpacity>
+                          ) : null}
                         </View>
                       </View>
-                      <View style={styles.bookingMeta}>
-                        <Ionicons name="people" size={11} color={colors.textLight} />
-                        <Text style={styles.bookingMetaText}>
-                          {b.members?.length || 1} {(b.members?.length || 1) > 1 ? 'players' : 'player'}
-                        </Text>
-                        <Text style={styles.bookingDot}>•</Text>
-                        <Ionicons name={b.isMember ? 'diamond' : 'person'} size={11} color={colors.textLight} />
-                        <Text style={styles.bookingMetaText}>{b.isMember ? 'Member' : 'Guest'}</Text>
-                      </View>
-                      <Text style={styles.bookingAmt}>Rs. {b.amount.toLocaleString()}</Text>
-                    </View>
-                  </TouchableOpacity>
-                ))}
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             ))
           )}
@@ -304,6 +369,17 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border,
     ...shadows.xs,
   },
+  bookingCardCancelled: { opacity: 0.6, backgroundColor: colors.surfaceAlt },
+  cancelledText: { textDecorationLine: 'line-through', color: colors.textMuted },
+  pillCancelled: { backgroundColor: colors.errorSoft },
+  bookingFootRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
+  cancelChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: spacing.sm, paddingVertical: 4,
+    borderRadius: borderRadius.round,
+    borderWidth: 1, borderColor: colors.error,
+  },
+  cancelChipText: { fontSize: 11, color: colors.error, fontWeight: '800' },
   bookingTime: {
     width: 60,
     paddingVertical: spacing.sm,

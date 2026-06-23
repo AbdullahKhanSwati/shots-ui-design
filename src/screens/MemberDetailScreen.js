@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Image,
   KeyboardAvoidingView,
@@ -19,10 +20,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import * as Clipboard from 'expo-clipboard';
+import * as ImagePicker from 'expo-image-picker';
+import * as MediaLibrary from 'expo-media-library';
 import { colors, typography, spacing, borderRadius, shadows } from '../styles/theme';
 import { membershipDurations, membershipTiers } from '../data/mockData';
 import { useShots } from '../store/ShotsStore';
-import { signedUrl } from '../lib/supabase';
+import { signedUrl, uploadToBucket } from '../lib/supabase';
 import MembershipVirtualCard from '../components/MembershipVirtualCard';
 import ScreenHeader from '../components/ScreenHeader';
 import GradientButton from '../components/GradientButton';
@@ -38,6 +41,9 @@ const MemberDetailScreen = ({ navigation, route }) => {
   const [renewDuration, setRenewDuration] = useState(membershipDurations[3]);
   const [renewPrice, setRenewPrice] = useState('');
   const [sharing, setSharing] = useState(false);
+  const [savingCard, setSavingCard] = useState(false);
+  const [photoViewer, setPhotoViewer] = useState(null); // image uri to show full-screen, or null
+  const [replacing, setReplacing] = useState(null); // 'photo' | 'front' | 'back' | null
 
   // Edit member info
   const [editOpen, setEditOpen] = useState(false);
@@ -97,6 +103,65 @@ const MemberDetailScreen = ({ navigation, route }) => {
     } finally {
       setSharing(false);
     }
+  };
+
+  // Save the rendered card image straight into the phone's photo gallery.
+  const saveCardToPhone = async () => {
+    if (savingCard) return;
+    try {
+      setSavingCard(true);
+      const perm = await MediaLibrary.requestPermissionsAsync();
+      if (!perm.granted) {
+        return Alert.alert('Permission needed', 'Allow photo library access to save the card to your phone.');
+      }
+      const uri = await captureCard();
+      await MediaLibrary.saveToLibraryAsync(uri);
+      Alert.alert('Saved', `${member.name}'s card was saved to your phone's gallery.`);
+    } catch (e) {
+      Alert.alert('Could not save card', e?.message || 'Try again in a moment.');
+    } finally {
+      setSavingCard(false);
+    }
+  };
+
+  // Replace an existing image (member face photo or ID card front/back).
+  const launchReplace = async (target, source) => {
+    try {
+      const opts = { mediaTypes: ['images'], allowsEditing: false, quality: 0.7 };
+      let result;
+      if (source === 'camera') {
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) return Alert.alert('Permission needed', 'Camera access is required to take a photo.');
+        result = await ImagePicker.launchCameraAsync(opts);
+      } else {
+        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) return Alert.alert('Permission needed', 'Photo library access is required to choose an image.');
+        result = await ImagePicker.launchImageLibraryAsync(opts);
+      }
+      if (result.canceled || !result.assets?.[0]) return;
+      const a = result.assets[0];
+      setReplacing(target);
+      const file = { uri: a.uri, name: a.fileName, type: a.mimeType };
+      if (target === 'photo') {
+        const url = await uploadToBucket('member-photos', file, 'members/');
+        await updateMember(member.id, { photo: url });
+      } else {
+        const path = await uploadToBucket('member-cnic', file, 'cnic/');
+        await updateMember(member.id, target === 'front' ? { cnicImage: path } : { cnicImageBack: path });
+      }
+    } catch (e) {
+      Alert.alert('Could not replace image', e?.message || 'Please try again.');
+    } finally {
+      setReplacing(null);
+    }
+  };
+
+  const replaceImage = (target, label) => {
+    Alert.alert(`Replace ${label}`, 'Choose a source', [
+      { text: 'Take Photo', onPress: () => launchReplace(target, 'camera') },
+      { text: 'Choose from Gallery', onPress: () => launchReplace(target, 'library') },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   };
 
   const copyValue = async (label, value) => {
@@ -254,16 +319,27 @@ const MemberDetailScreen = ({ navigation, route }) => {
           <MembershipVirtualCard member={member} />
         </View>
 
-        {/* Share card — one button, native share sheet */}
-        <TouchableOpacity
-          onPress={handleShare}
-          disabled={sharing}
-          style={[styles.shareBtn, sharing && styles.shareBtnDisabled]}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="share-social" size={18} color={colors.primary} />
-          <Text style={styles.shareText}>{sharing ? 'Preparing…' : 'Share Card'}</Text>
-        </TouchableOpacity>
+        {/* Share / Save card */}
+        <View style={styles.cardActionsRow}>
+          <TouchableOpacity
+            onPress={handleShare}
+            disabled={sharing}
+            style={[styles.shareBtn, sharing && styles.shareBtnDisabled]}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="share-social" size={18} color={colors.primary} />
+            <Text style={styles.shareText}>{sharing ? 'Preparing…' : 'Share Card'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={saveCardToPhone}
+            disabled={savingCard}
+            style={[styles.shareBtn, savingCard && styles.shareBtnDisabled]}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="download-outline" size={18} color={colors.primary} />
+            <Text style={styles.shareText}>{savingCard ? 'Saving…' : 'Save to Phone'}</Text>
+          </TouchableOpacity>
+        </View>
 
         {/* Copy contact details to populate a message manually */}
         <View style={styles.copyRow}>
@@ -294,7 +370,13 @@ const MemberDetailScreen = ({ navigation, route }) => {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Personal Info</Text>
+          <View style={styles.sectionTitleRow}>
+            <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Personal Info</Text>
+            <TouchableOpacity onPress={openEdit} style={styles.editPill} activeOpacity={0.85}>
+              <Ionicons name="create-outline" size={14} color={colors.primary} />
+              <Text style={styles.editPillText}>Edit</Text>
+            </TouchableOpacity>
+          </View>
           <InfoRow icon="card" label="CNIC" value={member.idCardNumber} />
           <InfoRow icon="mail" label="Email" value={member.email || '—'} />
           <InfoRow icon="call" label="Phone" value={member.phone} />
@@ -302,20 +384,52 @@ const MemberDetailScreen = ({ navigation, route }) => {
           <InfoRow icon="time-outline" label="Expires" value={member.expiryDate} isLast />
         </View>
 
+        {/* Member face photo — tap to enlarge, replace if needed */}
+        <View style={styles.section}>
+          <View style={styles.sectionTitleRow}>
+            <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Member Photo</Text>
+            <TouchableOpacity onPress={() => replaceImage('photo', 'member photo')} style={styles.editPill} activeOpacity={0.85}>
+              {replacing === 'photo'
+                ? <ActivityIndicator size="small" color={colors.primary} />
+                : <Ionicons name="camera-outline" size={14} color={colors.primary} />}
+              <Text style={styles.editPillText}>{replacing === 'photo' ? 'Saving…' : 'Replace'}</Text>
+            </TouchableOpacity>
+          </View>
+          {member.photo ? (
+            <TouchableOpacity activeOpacity={0.9} onPress={() => setPhotoViewer(member.photo)} style={styles.facePhotoWrap}>
+              <Image source={{ uri: member.photo }} style={styles.facePhoto} resizeMode="cover" />
+              <View style={styles.enlargeChip}>
+                <Ionicons name="expand-outline" size={13} color={colors.white} />
+                <Text style={styles.enlargeChipText}>Tap to enlarge</Text>
+              </View>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.empty}>
+              <Ionicons name="person-outline" size={32} color={colors.textMuted} />
+              <Text style={styles.emptyText}>No member photo on file</Text>
+            </View>
+          )}
+        </View>
+
         {/* ID card images */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>ID Card</Text>
-          {(cnicUrls.front || cnicUrls.back) ? (
-            <View style={styles.idCardRow}>
-              <IdCardView label="Front" url={cnicUrls.front} />
-              <IdCardView label="Back" url={cnicUrls.back} />
-            </View>
-          ) : (
-            <View style={styles.empty}>
-              <Ionicons name="card-outline" size={32} color={colors.textMuted} />
-              <Text style={styles.emptyText}>No ID card images on file</Text>
-            </View>
-          )}
+          <View style={styles.idCardRow}>
+            <IdCardView
+              label="Front"
+              url={cnicUrls.front}
+              onView={() => cnicUrls.front && setPhotoViewer(cnicUrls.front)}
+              onReplace={() => replaceImage('front', 'ID front')}
+              busy={replacing === 'front'}
+            />
+            <IdCardView
+              label="Back"
+              url={cnicUrls.back}
+              onView={() => cnicUrls.back && setPhotoViewer(cnicUrls.back)}
+              onReplace={() => replaceImage('back', 'ID back')}
+              busy={replacing === 'back'}
+            />
+          </View>
         </View>
 
         <View style={styles.section}>
@@ -512,6 +626,22 @@ const MemberDetailScreen = ({ navigation, route }) => {
           </KeyboardAvoidingView>
         </View>
       </Modal>
+
+      {/* Full-screen photo viewer (member photo / ID card) */}
+      <Modal visible={!!photoViewer} transparent animationType="fade" onRequestClose={() => setPhotoViewer(null)}>
+        <View style={styles.viewerOverlay}>
+          <TouchableOpacity
+            style={styles.viewerClose}
+            onPress={() => setPhotoViewer(null)}
+            hitSlop={12}
+          >
+            <Ionicons name="close" size={26} color={colors.white} />
+          </TouchableOpacity>
+          {photoViewer ? (
+            <Image source={{ uri: photoViewer }} style={styles.viewerImage} resizeMode="contain" />
+          ) : null}
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -536,11 +666,11 @@ const InfoRow = ({ icon, label, value, isLast }) => (
   </View>
 );
 
-const IdCardView = ({ label, url }) => (
+const IdCardView = ({ label, url, onView, onReplace, busy }) => (
   <View style={{ flex: 1 }}>
     <Text style={styles.idCardLabel}>{label}</Text>
     {url ? (
-      <TouchableOpacity activeOpacity={0.9} onPress={() => Linking.openURL(url)}>
+      <TouchableOpacity activeOpacity={0.9} onPress={onView}>
         <Image source={{ uri: url }} style={styles.idCardThumb} resizeMode="cover" />
       </TouchableOpacity>
     ) : (
@@ -549,6 +679,12 @@ const IdCardView = ({ label, url }) => (
         <Text style={styles.idCardEmptyText}>Not uploaded</Text>
       </View>
     )}
+    <TouchableOpacity onPress={onReplace} style={styles.idReplaceBtn} activeOpacity={0.85} disabled={busy}>
+      {busy
+        ? <ActivityIndicator size="small" color={colors.primary} />
+        : <Ionicons name={url ? 'camera-outline' : 'add-circle-outline'} size={14} color={colors.primary} />}
+      <Text style={styles.idReplaceText}>{busy ? 'Saving…' : url ? 'Replace' : 'Add'}</Text>
+    </TouchableOpacity>
   </View>
 );
 
@@ -556,7 +692,9 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background },
   scroll: { padding: spacing.lg },
   cardWrap: { marginBottom: spacing.md },
+  cardActionsRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm },
   shareBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -566,7 +704,6 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: colors.primary,
     backgroundColor: colors.surface,
-    marginBottom: spacing.sm,
     ...shadows.xs,
   },
   shareText: { ...typography.bodySmall, color: colors.text, fontWeight: '700' },
@@ -626,6 +763,49 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginBottom: spacing.md,
   },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+  },
+  editPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: borderRadius.round,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    backgroundColor: colors.surface,
+  },
+  editPillText: { ...typography.caption, color: colors.primary, fontWeight: '800', textTransform: 'none', letterSpacing: 0 },
+  facePhotoWrap: { borderRadius: borderRadius.lg, overflow: 'hidden', ...shadows.sm },
+  facePhoto: { width: '100%', height: 240, backgroundColor: colors.surfaceAlt },
+  enlargeChip: {
+    position: 'absolute', bottom: spacing.sm, right: spacing.sm,
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: spacing.sm + 2, paddingVertical: 5,
+    borderRadius: borderRadius.round,
+  },
+  enlargeChipText: { color: colors.white, fontSize: 11, fontWeight: '800' },
+  idReplaceBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
+    marginTop: spacing.sm, paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md, borderWidth: 1.5, borderColor: colors.primary,
+    backgroundColor: colors.surface,
+  },
+  idReplaceText: { ...typography.caption, color: colors.primary, fontWeight: '800', textTransform: 'none', letterSpacing: 0 },
+  viewerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', alignItems: 'center', justifyContent: 'center' },
+  viewerClose: {
+    position: 'absolute', top: 48, right: 20, zIndex: 2,
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  viewerImage: { width: '100%', height: '80%' },
   infoRow: {
     flexDirection: 'row',
     alignItems: 'center',

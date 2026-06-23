@@ -19,6 +19,7 @@ import MemberDetailScreen from '../screens/MemberDetailScreen';
 import TableDetailScreen from '../screens/TableDetailScreen';
 import AddExpenseScreen from '../screens/AddExpenseScreen';
 import BookingFormScreen from '../screens/BookingFormScreen';
+import ScanMemberScreen from '../screens/ScanMemberScreen';
 import MenuDrawer from '../components/MenuDrawer';
 import { colors, gradients } from '../styles/theme';
 
@@ -131,6 +132,7 @@ const RootNavigator = () => {
       <Stack.Screen name="MemberDetail" component={MemberDetailScreen} />
       <Stack.Screen name="TableDetail" component={TableDetailScreen} />
       <Stack.Screen name="BookingForm" component={BookingFormScreen} />
+      <Stack.Screen name="ScanMember" component={ScanMemberScreen} />
     </Stack.Navigator>
   );
 };

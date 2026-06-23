@@ -61,9 +61,11 @@ const TableDetailScreen = ({ navigation, route }) => {
   const freeIn = table ? tableFreeIn(table) : null;
 
   // Pick a table photo (camera or gallery), upload it, and persist the URL.
+  // allowsEditing is off so the Android system crop screen (hard-to-see controls,
+  // no clear cancel) never appears — the source dialog below has a Cancel option.
   const launchPicker = async (source) => {
     try {
-      const opts = { mediaTypes: ['images'], allowsEditing: true, aspect: [16, 10], quality: 0.7 };
+      const opts = { mediaTypes: ['images'], allowsEditing: false, quality: 0.7 };
       let result;
       if (source === 'camera') {
         const perm = await ImagePicker.requestCameraPermissionsAsync();

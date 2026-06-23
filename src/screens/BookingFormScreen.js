@@ -22,6 +22,7 @@ import {
 import { useShots } from '../store/ShotsStore';
 import GradientButton from '../components/GradientButton';
 import ScreenHeader from '../components/ScreenHeader';
+import SearchBar from '../components/SearchBar';
 
 const DURATIONS = [
   { label: '15 min', minutes: 15 },
@@ -59,6 +60,17 @@ const BookingFormScreen = ({ navigation, route }) => {
   const [guestName, setGuestName] = useState(existing && !existing.isMember ? existing.memberName : '');
   const [guestPhone, setGuestPhone] = useState('');
   const [memberPickerOpen, setMemberPickerOpen] = useState(false);
+  const [memberQuery, setMemberQuery] = useState('');
+
+  const filteredMembers = useMemo(() => {
+    const q = memberQuery.trim().toLowerCase();
+    if (!q) return memberList;
+    return memberList.filter((m) =>
+      m.name?.toLowerCase().includes(q) ||
+      m.id?.toLowerCase().includes(q) ||
+      m.phone?.toLowerCase().includes(q)
+    );
+  }, [memberList, memberQuery]);
 
   const [discountType, setDiscountType] = useState(existing?.discount?.type || 'none'); // none | percent | fixed
   const [discountValue, setDiscountValue] = useState(existing?.discount?.value ? String(existing.discount.value) : '');
@@ -436,8 +448,22 @@ const BookingFormScreen = ({ navigation, route }) => {
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
-              {memberList.map((m) => {
+            <View style={{ marginBottom: spacing.md }}>
+              <SearchBar
+                value={memberQuery}
+                onChangeText={setMemberQuery}
+                placeholder="Search by name, ID or phone…"
+              />
+            </View>
+
+            <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              {filteredMembers.length === 0 ? (
+                <View style={styles.pickerEmpty}>
+                  <Ionicons name="search-outline" size={32} color={colors.textMuted} />
+                  <Text style={styles.pickerEmptyText}>No members match “{memberQuery}”.</Text>
+                </View>
+              ) : null}
+              {filteredMembers.map((m) => {
                 const selected = !!members.find((x) => x.id === m.id);
                 return (
                   <TouchableOpacity
@@ -699,6 +725,8 @@ const styles = StyleSheet.create({
   memberPhoto: { width: 36, height: 36, borderRadius: 18 },
   memberPhotoFallback: { backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
   memberPhotoInit: { ...typography.caption, color: colors.primaryDark, fontWeight: '800' },
+  pickerEmpty: { alignItems: 'center', paddingVertical: spacing.xl, gap: spacing.sm },
+  pickerEmptyText: { ...typography.bodySmall, color: colors.textLight, textTransform: 'none', letterSpacing: 0 },
   memberRowName: { ...typography.bodySmall, color: colors.text, fontWeight: '700' },
   memberRowMeta: { ...typography.caption, color: colors.textLight, marginTop: 2, textTransform: 'none', letterSpacing: 0 },
   tick: {

@@ -20,7 +20,10 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0A0A0A"
-      }
+      },
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "bundler": "metro"
@@ -41,13 +44,30 @@
           "photosPermission": "Allow Shots to access your photos so you can attach a member's profile picture and ID card.",
           "cameraPermission": "Allow Shots to use the camera so you can capture a member's profile picture and ID card."
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Shots to use the camera to scan membership QR codes."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow Shots to access your photos.",
+          "savePhotosPermission": "Allow Shots to save membership cards to your photo gallery.",
+          "isAccessMediaLocationEnabled": false
+        }
       ]
     ],
+    "owner": "zerotyping",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "extra": {
       "eas": {
-        "projectId": "a153b3bc-a4d1-46ed-9e5f-2601a96ed874"
+        "projectId": "fa2ddb45-2798-47f6-88ab-215cbded8a1b"
       }
-    },
-    "owner": "abdullahg144"
+    }
   }
 }

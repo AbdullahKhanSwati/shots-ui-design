@@ -35,6 +35,8 @@ const AddMemberScreen = ({ navigation }) => {
   const [memberPhoto, setMemberPhoto] = useState(null);
   const [tier, setTier] = useState('Premium');
   const [duration, setDuration] = useState(membershipDurations[3]); // 1 Year
+  const [isCustom, setIsCustom] = useState(false);
+  const [customMonths, setCustomMonths] = useState('');
   const [price, setPrice] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -60,12 +62,14 @@ const AddMemberScreen = ({ navigation }) => {
     photo: memberPhoto?.uri || null,
   };
 
-  const canSubmit = name && phone && idCardNumber && memberId;
+  const canSubmit = name && phone && idCardNumber && memberId && duration.months >= 1;
 
   // Pick an image from the camera or gallery, then hand the selected asset to `setter`.
-  const launchPicker = async (source, setter, aspect) => {
+  // Note: allowsEditing is intentionally off — the Android system crop screen has
+  // hard-to-see controls; images are used as-is and auto-fit their frames.
+  const launchPicker = async (source, setter) => {
     try {
-      const opts = { mediaTypes: ['images'], allowsEditing: true, quality: 0.7, ...(aspect ? { aspect } : {}) };
+      const opts = { mediaTypes: ['images'], allowsEditing: false, quality: 0.7 };
       let result;
       if (source === 'camera') {
         const perm = await ImagePicker.requestCameraPermissionsAsync();
@@ -89,10 +93,10 @@ const AddMemberScreen = ({ navigation }) => {
     }
   };
 
-  const pickImage = (setter, aspect) => {
+  const pickImage = (setter) => {
     Alert.alert('Add Photo', 'Choose a source', [
-      { text: 'Take Photo', onPress: () => launchPicker('camera', setter, aspect) },
-      { text: 'Choose from Gallery', onPress: () => launchPicker('library', setter, aspect) },
+      { text: 'Take Photo', onPress: () => launchPicker('camera', setter) },
+      { text: 'Choose from Gallery', onPress: () => launchPicker('library', setter) },
       { text: 'Cancel', style: 'cancel' },
     ]);
   };
@@ -207,7 +211,7 @@ const AddMemberScreen = ({ navigation }) => {
             <Text style={styles.sectionLabel}>Member Photo</Text>
             <TouchableOpacity
               activeOpacity={0.85}
-              onPress={() => (memberPhoto ? setMemberPhoto(null) : pickImage(setMemberPhoto, [1, 1]))}
+              onPress={() => (memberPhoto ? setMemberPhoto(null) : pickImage(setMemberPhoto))}
               style={styles.photoBox}
             >
               {memberPhoto ? (
@@ -246,7 +250,7 @@ const AddMemberScreen = ({ navigation }) => {
             <TouchableOpacity
               style={styles.uploadBox}
               activeOpacity={0.85}
-              onPress={() => (idCardImage ? setIdCardImage(null) : pickImage(setIdCardImage, [16, 10]))}
+              onPress={() => (idCardImage ? setIdCardImage(null) : pickImage(setIdCardImage))}
             >
               {idCardImage ? (
                 <View style={styles.uploadedRow}>
@@ -272,7 +276,7 @@ const AddMemberScreen = ({ navigation }) => {
             <TouchableOpacity
               style={styles.uploadBox}
               activeOpacity={0.85}
-              onPress={() => (idCardImageBack ? setIdCardImageBack(null) : pickImage(setIdCardImageBack, [16, 10]))}
+              onPress={() => (idCardImageBack ? setIdCardImageBack(null) : pickImage(setIdCardImageBack))}
             >
               {idCardImageBack ? (
                 <View style={styles.uploadedRow}>
@@ -330,18 +334,52 @@ const AddMemberScreen = ({ navigation }) => {
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>Expiration</Text>
             <View style={styles.durationRow}>
-              {membershipDurations.map((d) => (
-                <Pressable
-                  key={d.label}
-                  onPress={() => setDuration(d)}
-                  style={[styles.duration, duration.label === d.label && styles.durationActive]}
-                >
-                  <Text style={[styles.durationText, duration.label === d.label && styles.durationTextActive]}>
-                    {d.label}
-                  </Text>
-                </Pressable>
-              ))}
+              {membershipDurations.map((d) => {
+                const active = !isCustom && duration.label === d.label;
+                return (
+                  <Pressable
+                    key={d.label}
+                    onPress={() => { setIsCustom(false); setDuration(d); }}
+                    style={[styles.duration, active && styles.durationActive]}
+                  >
+                    <Text style={[styles.durationText, active && styles.durationTextActive]}>
+                      {d.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+              <Pressable
+                onPress={() => {
+                  setIsCustom(true);
+                  const m = Number(customMonths) || 1;
+                  setDuration({ label: 'Custom', months: m });
+                }}
+                style={[styles.duration, isCustom && styles.durationActive]}
+              >
+                <Text style={[styles.durationText, isCustom && styles.durationTextActive]}>Custom</Text>
+              </Pressable>
             </View>
+
+            {isCustom ? (
+              <View style={styles.customRow}>
+                <Ionicons name="calendar-number-outline" size={18} color={colors.primary} />
+                <TextInput
+                  value={customMonths}
+                  onChangeText={(v) => {
+                    const clean = v.replace(/\D/g, '');
+                    setCustomMonths(clean);
+                    setDuration({ label: 'Custom', months: Number(clean) || 0 });
+                  }}
+                  placeholder="e.g. 18"
+                  placeholderTextColor={colors.textMuted}
+                  keyboardType="number-pad"
+                  maxLength={3}
+                  style={styles.customInput}
+                />
+                <Text style={styles.customUnit}>months</Text>
+              </View>
+            ) : null}
+
             <View style={styles.expiryHint}>
               <Ionicons name="calendar-outline" size={14} color={colors.primary} />
               <Text style={styles.expiryHintText}>
@@ -529,6 +567,26 @@ const styles = StyleSheet.create({
   durationActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   durationText: { ...typography.bodySmall, color: colors.text, fontWeight: '600' },
   durationTextActive: { color: colors.white },
+  customRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    backgroundColor: colors.surfaceAlt,
+    paddingHorizontal: spacing.md,
+    height: 50,
+    borderRadius: borderRadius.md,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+  },
+  customInput: {
+    flex: 1,
+    ...typography.body,
+    color: colors.text,
+    fontWeight: '800',
+    paddingVertical: 0,
+  },
+  customUnit: { ...typography.bodySmall, color: colors.textLight, fontWeight: '700' },
   expiryHint: {
     marginTop: spacing.md,
     flexDirection: 'row',

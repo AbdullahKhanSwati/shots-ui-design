@@ -58,6 +58,9 @@ const MembershipsScreen = ({ navigation }) => {
           </TouchableOpacity>
           <Text style={styles.heroTitle}>Memberships</Text>
           <View style={styles.heroActions}>
+            <TouchableOpacity style={styles.iconBtn} hitSlop={10} onPress={() => navigation.navigate('ScanMember')}>
+              <Ionicons name="qr-code-outline" size={20} color={colors.white} />
+            </TouchableOpacity>
             <TouchableOpacity style={styles.iconBtn} hitSlop={10} onPress={() => navigation.navigate('AddMember')}>
               <Ionicons name="add" size={22} color={colors.white} />
             </TouchableOpacity>
