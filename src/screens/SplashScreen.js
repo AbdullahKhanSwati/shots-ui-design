@@ -1,7 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Image, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { colors, gradients, typography, spacing } from '../styles/theme';
 import { useAuth } from '../context/AuthContext';
 
@@ -53,9 +52,7 @@ const SplashScreen = ({ navigation }) => {
       <Animated.View style={[styles.ringInner, { transform: [{ rotate: spin }] }]} />
 
       <Animated.View style={[styles.logoWrap, { transform: [{ scale }], opacity }]}>
-        <LinearGradient colors={gradients.brand} style={styles.logoCircle}>
-          <Ionicons name="game-controller" size={56} color={colors.white} />
-        </LinearGradient>
+        <Image source={require('../../assets/brand-logo.png')} style={styles.logoCircle} resizeMode="cover" />
       </Animated.View>
 
       <Animated.View style={{ opacity, alignItems: 'center' }}>

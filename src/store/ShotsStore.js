@@ -9,6 +9,7 @@ import React, {
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { generateMemberId } from '../data/mockData';
+import { getCache, setCache } from '../lib/offlineCache';
 
 /**
  * Live data store backed by Supabase.
@@ -79,6 +80,7 @@ export function ShotsProvider({ children }) {
   const [bookings, setBookings] = useState([]);
   const [finance, setFinance] = useState([]);
   const [ready, setReady] = useState(false);
+  const [offline, setOffline] = useState(false);
 
   const reload = useCallback(async () => {
     if (!businessId) return;
@@ -96,6 +98,9 @@ export function ShotsProvider({ children }) {
   }, [businessId]);
 
   // Initial load whenever the signed-in business changes.
+  // Offline-friendly: hydrate instantly from the local snapshot, then refresh
+  // from Supabase when reachable. If the refresh fails (no internet) we keep the
+  // cached copy on screen and flag `offline`.
   useEffect(() => {
     if (!businessId) {
       setTables([]); setMembers([]); setBookings([]); setFinance([]); setReady(false);
@@ -103,21 +108,49 @@ export function ShotsProvider({ children }) {
     }
     let active = true;
     (async () => {
-      const [t, m, b, f] = await Promise.all([
-        supabase.from('pool_tables').select('*').order('number', { ascending: true }),
-        supabase.from('members').select('*').order('created_at', { ascending: true }),
-        supabase.from('bookings').select('*').order('date', { ascending: true }),
-        supabase.from('transactions').select('*').order('date', { ascending: true }),
-      ]);
-      if (!active) return;
-      setTables((t.data || []).map(rowToTable));
-      setMembers((m.data || []).map(rowToMember));
-      setBookings((b.data || []).map(rowToBooking));
-      setFinance((f.data || []).map(rowToFinance));
-      setReady(true);
+      // 1) Instant hydrate from the last saved snapshot.
+      const cached = await getCache(`data:${businessId}`);
+      if (active && cached) {
+        setTables(cached.tables || []);
+        setMembers(cached.members || []);
+        setBookings(cached.bookings || []);
+        setFinance(cached.finance || []);
+        setReady(true);
+      }
+      // 2) Refresh from Supabase if it's reachable.
+      try {
+        const [t, m, b, f] = await Promise.all([
+          supabase.from('pool_tables').select('*').order('number', { ascending: true }),
+          supabase.from('members').select('*').order('created_at', { ascending: true }),
+          supabase.from('bookings').select('*').order('date', { ascending: true }),
+          supabase.from('transactions').select('*').order('date', { ascending: true }),
+        ]);
+        if (!active) return;
+        if (t.error || m.error || b.error || f.error) {
+          // Reachable but errored (commonly offline) — keep the cached copy.
+          setOffline(true);
+          setReady(true);
+          return;
+        }
+        setTables((t.data || []).map(rowToTable));
+        setMembers((m.data || []).map(rowToMember));
+        setBookings((b.data || []).map(rowToBooking));
+        setFinance((f.data || []).map(rowToFinance));
+        setOffline(false);
+        setReady(true);
+      } catch (e) {
+        // Network threw — stay on cached data and mark offline.
+        if (active) { setOffline(true); setReady(true); }
+      }
     })();
     return () => { active = false; };
   }, [businessId]);
+
+  // Persist the latest snapshot so it's available next time there's no internet.
+  useEffect(() => {
+    if (!businessId || !ready) return;
+    setCache(`data:${businessId}`, { tables, members, bookings, finance });
+  }, [businessId, ready, tables, members, bookings, finance]);
 
   // Live sync: subscribe to Postgres changes so anything the admin dashboard
   // does (e.g. marking a table for maintenance) reflects in the app instantly.
@@ -272,13 +305,13 @@ export function ShotsProvider({ children }) {
   }, [businessId]);
 
   const value = useMemo(() => ({
-    tables, members, bookings, finance, ready, reload,
+    tables, members, bookings, finance, ready, offline, reload,
     updateTable,
     addMember, updateMember, deleteMember,
     addBooking, updateBooking, deleteBooking,
     addFinanceEntry,
   }), [
-    tables, members, bookings, finance, ready, reload,
+    tables, members, bookings, finance, ready, offline, reload,
     updateTable,
     addMember, updateMember, deleteMember,
     addBooking, updateBooking, deleteBooking,

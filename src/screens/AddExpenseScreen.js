@@ -1,8 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,6 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, typography, spacing, borderRadius, shadows } from '../styles/theme';
 import { expenseCategories } from '../data/mockData';
@@ -153,15 +152,13 @@ const AddExpenseScreen = ({ navigation, route }) => {
         variant="gradient"
       />
 
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      <KeyboardAwareScrollView
         style={{ flex: 1 }}
+        bottomOffset={100}
+        contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 110 }]}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
-        <ScrollView
-          contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 110 }]}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
           {/* Table picker (optional) */}
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>Allocate to Table</Text>
@@ -241,14 +238,13 @@ const AddExpenseScreen = ({ navigation, route }) => {
               style={styles.descInput}
             />
           </View>
-        </ScrollView>
+        </KeyboardAwareScrollView>
 
         {/* This screen is the "Expense" tab, so the floating tab bar (~74px)
             overlaps the bottom — pad the footer up so the button stays tappable. */}
         <View style={[styles.footer, { paddingBottom: insets.bottom + 84 }]}>
           <GradientButton label="Save Expense" icon="save" onPress={handleSave} loading={saving} disabled={saving} />
         </View>
-      </KeyboardAvoidingView>
     </View>
   );
 };

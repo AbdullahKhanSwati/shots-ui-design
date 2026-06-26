@@ -2,9 +2,7 @@ import React, { useMemo, useState } from 'react';
 import {
   Alert,
   Image,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,6 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { colors, typography, spacing, borderRadius, shadows } from '../styles/theme';
 import {
   intervalsForRange, bookedIntervalsFor, addMinutes,
@@ -205,15 +204,13 @@ const BookingFormScreen = ({ navigation, route }) => {
         variant="gradient"
       />
 
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      <KeyboardAwareScrollView
         style={{ flex: 1 }}
+        bottomOffset={110}
+        contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 120 }]}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
-        <ScrollView
-          contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 120 }]}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
           {/* Summary */}
           <View style={styles.summary}>
             <View style={styles.summaryRow}>
@@ -408,7 +405,7 @@ const BookingFormScreen = ({ navigation, route }) => {
               </>
             )}
           </View>
-        </ScrollView>
+        </KeyboardAwareScrollView>
 
         {/* Sticky total + confirm */}
         <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
@@ -426,7 +423,6 @@ const BookingFormScreen = ({ navigation, route }) => {
             />
           </View>
         </View>
-      </KeyboardAvoidingView>
 
       {/* Member picker modal */}
       <Modal

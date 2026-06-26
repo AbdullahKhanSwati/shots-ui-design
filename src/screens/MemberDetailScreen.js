@@ -3,10 +3,8 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  KeyboardAvoidingView,
   Linking,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,6 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { KeyboardProvider, KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { captureRef } from 'react-native-view-shot';
@@ -475,8 +474,9 @@ const MemberDetailScreen = ({ navigation, route }) => {
 
       {/* Renew sheet */}
       <Modal visible={renewOpen} transparent animationType="slide" onRequestClose={() => setRenewOpen(false)}>
+        <KeyboardProvider>
         <View style={styles.modalOverlay}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%' }}>
+          <KeyboardAvoidingView behavior="padding" style={{ width: '100%' }}>
             <View style={[styles.modalCard, { paddingBottom: insets.bottom + spacing.md }]}>
               <View style={styles.modalHandle} />
               <View style={styles.modalHead}>
@@ -529,12 +529,14 @@ const MemberDetailScreen = ({ navigation, route }) => {
             </View>
           </KeyboardAvoidingView>
         </View>
+        </KeyboardProvider>
       </Modal>
 
       {/* Edit member info */}
       <Modal visible={editOpen} transparent animationType="slide" onRequestClose={() => setEditOpen(false)}>
+        <KeyboardProvider>
         <View style={styles.modalOverlay}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%' }}>
+          <KeyboardAvoidingView behavior="padding" style={{ width: '100%' }}>
             <View style={[styles.modalCard, { paddingBottom: insets.bottom + spacing.md }]}>
               <View style={styles.modalHandle} />
               <View style={styles.modalHead}>
@@ -625,6 +627,7 @@ const MemberDetailScreen = ({ navigation, route }) => {
             </View>
           </KeyboardAvoidingView>
         </View>
+        </KeyboardProvider>
       </Modal>
 
       {/* Full-screen photo viewer (member photo / ID card) */}

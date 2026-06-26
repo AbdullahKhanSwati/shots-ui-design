@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { getCache, setCache } from '../lib/offlineCache';
 
 const AuthContext = createContext(null);
 
@@ -42,27 +43,52 @@ export function AuthProvider({ children }) {
       }
 
       const user = authSession.user;
-      const { data: profile } = await supabase
+      const cacheKey = `auth:${user.id}`;
+      // Last known business/profile — used when the network is unreachable.
+      const cached = await getCache(cacheKey);
+
+      // The Supabase session itself is read from local storage (works offline);
+      // only the profile/business lookups below need the network.
+      const { data: profile, error: profileErr } = await supabase
         .from('profiles')
         .select('*')
         .eq('user_id', user.id)
         .maybeSingle();
 
-      const businessId = profile?.business_id || 'shots';
+      let businessId;
+      let business;
+      let prof;
 
-      const { data: businessRow } = await supabase
-        .from('businesses')
-        .select('*')
-        .eq('id', businessId)
-        .maybeSingle();
+      if (!profileErr) {
+        // Online: resolve fresh, then cache for offline use.
+        prof = profile || null;
+        businessId = profile?.business_id || 'shots';
+        const { data: businessRow, error: bizErr } = await supabase
+          .from('businesses')
+          .select('*')
+          .eq('id', businessId)
+          .maybeSingle();
+        business = !bizErr && businessRow ? mapBusiness(businessRow) : cached?.business || null;
+        await setCache(cacheKey, { businessId, business, profile: prof });
+      } else if (cached) {
+        // Offline: fall back to the last known business/profile.
+        businessId = cached.businessId;
+        business = cached.business;
+        prof = cached.profile;
+      } else {
+        // Offline with no cache yet — best-effort default.
+        businessId = 'shots';
+        business = null;
+        prof = null;
+      }
 
       if (!active) return;
       setSession({
         user,
         email: user.email,
-        profile: profile || null,
+        profile: prof,
         businessId,
-        business: mapBusiness(businessRow),
+        business,
       });
       setLoading(false);
     }

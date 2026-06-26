@@ -2,10 +2,7 @@ import React, { useMemo, useState } from 'react';
 import {
   Alert,
   Image,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -15,6 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { colors, typography, spacing, borderRadius, shadows } from '../styles/theme';
 import { generateMemberId, membershipDurations, membershipTiers } from '../data/mockData';
 import { useShots } from '../store/ShotsStore';
@@ -181,15 +179,13 @@ const AddMemberScreen = ({ navigation }) => {
         variant="gradient"
       />
 
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      <KeyboardAwareScrollView
         style={{ flex: 1 }}
+        bottomOffset={100}
+        contentContainerStyle={[styles.scroll, { paddingBottom: 120 + insets.bottom }]}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
-        <ScrollView
-          contentContainerStyle={[styles.scroll, { paddingBottom: 120 + insets.bottom }]}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
           {/* Live preview card */}
           <View style={styles.previewWrap}>
             <Text style={styles.sectionLabel}>Live Preview</Text>
@@ -407,7 +403,7 @@ const AddMemberScreen = ({ navigation }) => {
               />
             </View>
           </View>
-        </ScrollView>
+        </KeyboardAwareScrollView>
 
         <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
           <GradientButton
@@ -418,7 +414,6 @@ const AddMemberScreen = ({ navigation }) => {
             disabled={!canSubmit || saving}
           />
         </View>
-      </KeyboardAvoidingView>
     </View>
   );
 };

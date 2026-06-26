@@ -1,9 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
+  Image,
   StyleSheet,
   Text,
   TextInput,
@@ -14,6 +12,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { colors, gradients, typography, spacing, borderRadius, shadows } from '../styles/theme';
 import GradientButton from '../components/GradientButton';
 import { useAuth } from '../context/AuthContext';
@@ -57,19 +56,15 @@ const LoginScreen = ({ navigation, route }) => {
       <View style={styles.glowA} />
       <View style={styles.glowB} />
       <SafeAreaView style={{ flex: 1 }}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        <KeyboardAwareScrollView
           style={{ flex: 1 }}
+          bottomOffset={24}
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
-          <ScrollView
-            contentContainerStyle={styles.scroll}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-          >
             <View style={styles.brandRow}>
-              <LinearGradient colors={gradients.brand} style={styles.brandLogo}>
-                <Ionicons name="game-controller" size={28} color={colors.white} />
-              </LinearGradient>
+              <Image source={require('../../assets/brand-logo.png')} style={styles.brandLogo} resizeMode="cover" />
               <View>
                 <Text style={styles.brandText}>SHOTS</Text>
                 <Text style={styles.brandTag}>Staff Console</Text>
@@ -128,8 +123,7 @@ const LoginScreen = ({ navigation, route }) => {
             <Text style={styles.bottomNote}>
               New staff accounts are created from the admin dashboard.
             </Text>
-          </ScrollView>
-        </KeyboardAvoidingView>
+          </KeyboardAwareScrollView>
       </SafeAreaView>
     </View>
   );

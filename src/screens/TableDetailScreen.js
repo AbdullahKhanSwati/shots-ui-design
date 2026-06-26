@@ -34,7 +34,7 @@ const STATUSES = [
 
 const TableDetailScreen = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
-  const { tables, bookings, updateTable, updateBooking, deleteBooking } = useShots();
+  const { tables, bookings, updateTable, updateBooking } = useShots();
   const id = route.params?.tableId;
   const table = tables.find((t) => t.id === id);
 
@@ -192,14 +192,14 @@ const TableDetailScreen = ({ navigation, route }) => {
     if (!b) return;
     Alert.alert(
       'Cancel booking?',
-      `This will free up ${b.start}–${b.end} on Table #${table.number}. This cannot be undone.`,
+      `This frees up ${b.start}–${b.end} on Table #${table.number}. The booking is kept in your records as Cancelled.`,
       [
         { text: 'Keep booking', style: 'cancel' },
         {
           text: 'Cancel booking',
           style: 'destructive',
           onPress: async () => {
-            await deleteBooking(b.id);
+            await updateBooking(b.id, { status: 'Cancelled' });
             setBookingModal(null);
             setTick((t) => t + 1);
           },
