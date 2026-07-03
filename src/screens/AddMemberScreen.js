@@ -23,7 +23,7 @@ import ScreenHeader from '../components/ScreenHeader';
 
 const AddMemberScreen = ({ navigation }) => {
   const insets = useSafeAreaInsets();
-  const { members, addMember, addFinanceEntry } = useShots();
+  const { members, addMember, addFinanceEntry, businessName } = useShots();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
@@ -67,7 +67,7 @@ const AddMemberScreen = ({ navigation }) => {
   // hard-to-see controls; images are used as-is and auto-fit their frames.
   const launchPicker = async (source, setter) => {
     try {
-      const opts = { mediaTypes: ['images'], allowsEditing: false, quality: 0.7 };
+      const opts = { mediaTypes: ['images'], allowsEditing: false, quality: 0.9 };
       let result;
       if (source === 'camera') {
         const perm = await ImagePicker.requestCameraPermissionsAsync();
@@ -107,10 +107,22 @@ const AddMemberScreen = ({ navigation }) => {
     setSaving(true);
     try {
       // Upload the picked profile photo / ID card to Storage and persist the
-      // returned references (public URL for the photo, object path for the CNIC).
+      // returned references. Image uploads need internet — if we're offline the
+      // upload fails and we create the member without images (they can be added
+      // later from the member's page once back online).
+      let imagesSkipped = false;
+      const tryUpload = async (bucket, file, prefix) => {
+        try {
+          return await uploadToBucket(bucket, file, prefix);
+        } catch (e) {
+          imagesSkipped = true;
+          return null;
+        }
+      };
+
       let photoUrl = null;
       if (memberPhoto?.uri) {
-        photoUrl = await uploadToBucket(
+        photoUrl = await tryUpload(
           'member-photos',
           { uri: memberPhoto.uri, name: memberPhoto.fileName, type: memberPhoto.mimeType },
           'members/',
@@ -118,7 +130,7 @@ const AddMemberScreen = ({ navigation }) => {
       }
       let cnicImage = null;
       if (idCardImage?.uri) {
-        cnicImage = await uploadToBucket(
+        cnicImage = await tryUpload(
           'member-cnic',
           { uri: idCardImage.uri, name: idCardImage.fileName, type: idCardImage.mimeType },
           'cnic/',
@@ -126,7 +138,7 @@ const AddMemberScreen = ({ navigation }) => {
       }
       let cnicImageBack = null;
       if (idCardImageBack?.uri) {
-        cnicImageBack = await uploadToBucket(
+        cnicImageBack = await tryUpload(
           'member-cnic',
           { uri: idCardImageBack.uri, name: idCardImageBack.fileName, type: idCardImageBack.mimeType },
           'cnic/',
@@ -160,7 +172,10 @@ const AddMemberScreen = ({ navigation }) => {
       }
 
       const priceMsg = price ? ` Rs. ${Number(price).toLocaleString()} added to revenue.` : '';
-      Alert.alert('Member Added', `${name} registered with ID ${memberId}.${priceMsg}`, [
+      const imgMsg = imagesSkipped
+        ? '\n\nNote: photos couldn’t be uploaded (offline). Add them from the member’s page once you’re back online.'
+        : '';
+      Alert.alert('Member Added', `${name} registered with ID ${memberId}.${priceMsg}${imgMsg}`, [
         { text: 'OK', onPress: () => navigation.goBack() },
       ]);
     } catch (e) {
@@ -189,7 +204,7 @@ const AddMemberScreen = ({ navigation }) => {
           {/* Live preview card */}
           <View style={styles.previewWrap}>
             <Text style={styles.sectionLabel}>Live Preview</Text>
-            <MembershipVirtualCard member={previewMember} compact />
+            <MembershipVirtualCard member={previewMember} businessName={businessName} compact />
             {memberId ? (
               <View style={styles.idHint}>
                 <Ionicons name="checkmark-circle" size={14} color={colors.success} />

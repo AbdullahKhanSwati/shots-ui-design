@@ -21,7 +21,13 @@ import AddExpenseScreen from '../screens/AddExpenseScreen';
 import BookingFormScreen from '../screens/BookingFormScreen';
 import ScanMemberScreen from '../screens/ScanMemberScreen';
 import MenuDrawer from '../components/MenuDrawer';
+import { useAuth } from '../context/AuthContext';
 import { colors, gradients } from '../styles/theme';
+
+// Dashboard (revenue/finance overview) is only shown to admins/owners.
+export function isAdminRole(role) {
+  return ['admin', 'owner'].includes(String(role || '').toLowerCase());
+}
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -39,9 +45,12 @@ const TAB_ICONS = {
 
 const DashboardTabNavigator = () => {
   const insets = useSafeAreaInsets();
+  const { session } = useAuth();
+  const isAdmin = isAdminRole(session?.profile?.role);
 
   return (
     <Tab.Navigator
+      initialRouteName={isAdmin ? 'Dashboard' : 'Members'}
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarShowLabel: true,
@@ -89,7 +98,7 @@ const DashboardTabNavigator = () => {
         },
       })}
     >
-      <Tab.Screen name="Dashboard"   component={DashboardScreen} />
+      {isAdmin && <Tab.Screen name="Dashboard"   component={DashboardScreen} />}
       <Tab.Screen name="Members"     component={MembershipsScreen} />
       <Tab.Screen name="Bookings"    component={TablesScreen} />
       {/* Finance hidden for now — keep the screen, just don't surface the tab.

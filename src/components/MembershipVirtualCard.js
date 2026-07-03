@@ -6,8 +6,9 @@ import QRCode from 'react-native-qrcode-svg';
 import { colors, gradients, typography, spacing, borderRadius, shadows } from '../styles/theme';
 
 // Virtual bank-style membership card with QR + photo (no CNIC shown)
-const MembershipVirtualCard = ({ member, compact }) => {
+const MembershipVirtualCard = ({ member, compact, businessName }) => {
   if (!member) return null;
+  const issuer = (businessName && businessName.trim()) || 'Shots Club';
   const tierIcon = {
     Premium: 'diamond',
     Standard: 'star',
@@ -95,7 +96,7 @@ const MembershipVirtualCard = ({ member, compact }) => {
         <View style={styles.bottomRow}>
           <View style={{ flex: 1 }}>
             <Text style={styles.fieldLabel}>Membership</Text>
-            <Text style={styles.fieldValue}>Issued by Shots Club</Text>
+            <Text style={styles.fieldValue} numberOfLines={1}>Issued by {issuer}</Text>
           </View>
           <View style={styles.statusGroup}>
             <View style={[styles.statusDot, { backgroundColor: member.status === 'Active' ? colors.success : colors.error }]} />

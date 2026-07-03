@@ -31,7 +31,7 @@ import GradientButton from '../components/GradientButton';
 
 const MemberDetailScreen = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
-  const { members, bookings, updateMember, addFinanceEntry } = useShots();
+  const { members, bookings, updateMember, addFinanceEntry, businessName } = useShots();
   const id = route.params?.memberId;
   const member = members.find((m) => m.id === id);
   const visits = bookings.filter((b) => b.memberId === id);
@@ -43,6 +43,7 @@ const MemberDetailScreen = ({ navigation, route }) => {
   const [savingCard, setSavingCard] = useState(false);
   const [photoViewer, setPhotoViewer] = useState(null); // image uri to show full-screen, or null
   const [replacing, setReplacing] = useState(null); // 'photo' | 'front' | 'back' | null
+  const [cardSize, setCardSize] = useState({ width: 0, height: 0 }); // measured for hi-res capture
 
   // Edit member info
   const [editOpen, setEditOpen] = useState(false);
@@ -66,11 +67,14 @@ const MemberDetailScreen = ({ navigation, route }) => {
   const cardRef = useRef(null);
 
   const captureCard = async () => {
-    return captureRef(cardRef, {
-      format: 'png',
-      quality: 1.0,
-      result: 'tmpfile',
-    });
+    // Capture at 3x the on-screen size so the saved/shared card (and the member's
+    // face) stays crisp instead of blurry.
+    const opts = { format: 'png', quality: 1.0, result: 'tmpfile' };
+    if (cardSize.width > 0 && cardSize.height > 0) {
+      opts.width = Math.round(cardSize.width * 3);
+      opts.height = Math.round(cardSize.height * 3);
+    }
+    return captureRef(cardRef, opts);
   };
 
   const shareMessage = () =>
@@ -126,7 +130,7 @@ const MemberDetailScreen = ({ navigation, route }) => {
   // Replace an existing image (member face photo or ID card front/back).
   const launchReplace = async (target, source) => {
     try {
-      const opts = { mediaTypes: ['images'], allowsEditing: false, quality: 0.7 };
+      const opts = { mediaTypes: ['images'], allowsEditing: false, quality: 0.9 };
       let result;
       if (source === 'camera') {
         const perm = await ImagePicker.requestCameraPermissionsAsync();
@@ -314,8 +318,13 @@ const MemberDetailScreen = ({ navigation, route }) => {
         contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 90 }]}
         showsVerticalScrollIndicator={false}
       >
-        <View ref={cardRef} collapsable={false} style={styles.cardWrap}>
-          <MembershipVirtualCard member={member} />
+        <View
+          ref={cardRef}
+          collapsable={false}
+          style={styles.cardWrap}
+          onLayout={(e) => setCardSize({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height })}
+        >
+          <MembershipVirtualCard member={member} businessName={businessName} />
         </View>
 
         {/* Share / Save card */}

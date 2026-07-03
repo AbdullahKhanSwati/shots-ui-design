@@ -64,12 +64,27 @@ export default function App() {
   );
 }
 
-// Small toast-style pill shown while the app is running on cached data.
+// Small toast-style pill reflecting offline / queued / syncing state.
 // Positioned as an overlay so it never disturbs screen header layouts.
 function OfflineBanner() {
-  const { offline } = useShots();
+  const { offline, pending, syncing } = useShots();
   const insets = useSafeAreaInsets();
-  if (!offline) return null;
+
+  let icon = null;
+  let text = null;
+  let dot = '#F4B860';
+  if (syncing && pending > 0) {
+    icon = 'sync-outline'; dot = '#10B981';
+    text = `Syncing ${pending} change${pending === 1 ? '' : 's'}…`;
+  } else if (pending > 0) {
+    icon = 'cloud-upload-outline';
+    text = `${pending} change${pending === 1 ? '' : 's'} waiting to sync`;
+  } else if (offline) {
+    icon = 'cloud-offline-outline';
+    text = 'Offline — showing saved data';
+  }
+  if (!text) return null;
+
   return (
     <View
       pointerEvents="none"
@@ -93,10 +108,8 @@ function OfflineBanner() {
           borderRadius: 999,
         }}
       >
-        <Ionicons name="cloud-offline-outline" size={14} color="#F4B860" />
-        <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 12 }}>
-          Offline — showing saved data
-        </Text>
+        <Ionicons name={icon} size={14} color={dot} />
+        <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 12 }}>{text}</Text>
       </View>
     </View>
   );

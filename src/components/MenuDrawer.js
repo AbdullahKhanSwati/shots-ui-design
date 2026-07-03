@@ -1,14 +1,25 @@
 import React from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, gradients, typography, spacing, borderRadius, shadows } from '../styles/theme';
 import { useAuth } from '../context/AuthContext';
 
+const ADMIN_URL = 'https://sadozai-admin.vercel.app/login';
+
 const MenuDrawer = ({ navigation }) => {
   const insets = useSafeAreaInsets();
   const { session, logout } = useAuth();
+  const isAdmin = ['admin', 'owner'].includes(String(session?.profile?.role || '').toLowerCase());
+
+  const openAdminPanel = async () => {
+    try {
+      await Linking.openURL(ADMIN_URL);
+    } catch (e) {
+      Alert.alert('Could not open link', 'Please open the admin panel in your browser.');
+    }
+  };
 
   const staffName = session?.profile?.name || 'Active Staff';
   const staffEmail = session?.email || session?.profile?.email || '';
@@ -29,7 +40,10 @@ const MenuDrawer = ({ navigation }) => {
     {
       title: 'Workspace',
       items: [
-        { icon: 'home-outline', label: 'Dashboard', onPress: () => navigation.navigate('MainTabs', { screen: 'Dashboard' }) },
+        // Dashboard (revenue overview) is admin-only.
+        ...(isAdmin
+          ? [{ icon: 'home-outline', label: 'Dashboard', onPress: () => navigation.navigate('MainTabs', { screen: 'Dashboard' }) }]
+          : []),
         { icon: 'people-outline', label: 'Memberships', onPress: () => navigation.navigate('MainTabs', { screen: 'Members' }) },
         { icon: 'grid-outline', label: 'Bookings', onPress: () => navigation.navigate('MainTabs', { screen: 'Bookings' }) },
         // Finance hidden for now (kept in code).
@@ -37,12 +51,10 @@ const MenuDrawer = ({ navigation }) => {
       ],
     },
     {
-      title: 'Settings',
+      title: 'More',
       items: [
-
-        {
-          icon: 'log-out-outline', label: 'Logout', danger: true, onPress: handleLogout,
-        },
+        { icon: 'globe-outline', label: 'Admin Panel (Web)', onPress: openAdminPanel },
+        { icon: 'log-out-outline', label: 'Logout', danger: true, onPress: handleLogout },
       ],
     },
   ];

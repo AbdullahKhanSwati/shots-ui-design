@@ -4,20 +4,26 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
+import { AppState } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { generateMemberId } from '../data/mockData';
 import { getCache, setCache } from '../lib/offlineCache';
 
 /**
- * Live data store backed by Supabase.
+ * Offline-first data store backed by Supabase.
  *
- * The exported state arrays + add/update/delete fns mirror the original
- * in-memory mock helpers, and the *field names* are kept 1:1 with what the
- * screens already use, so the UI did not change. Snake_case DB columns are
- * mapped to the camelCase fields the UI reads via the row<->payload mappers.
+ * Reads: hydrate instantly from a local snapshot, then refresh from Supabase.
+ * Writes: apply to on-screen state immediately + push an operation onto a
+ * persistent OUTBOX. When the network is reachable the outbox is flushed to
+ * Supabase (FIFO), then fresh server state is pulled to reconcile.
+ *
+ * The exported add/update/delete fns and camelCase field names are unchanged,
+ * so screens didn't need to change — they just no longer fail when offline.
  */
 
 const ShotsContext = createContext(null);
@@ -68,8 +74,28 @@ const rowToMember = (r) => fromRow(r, MEMBER_KEYS);
 const rowToBooking = (r) => fromRow(r, BOOKING_KEYS);
 const rowToFinance = (r) => fromRow(r, FINANCE_KEYS);
 
+// Entity registry — links the outbox `entity` to its table + row->UI mapper.
+const CFG = {
+  members:      { table: 'members',      toUi: rowToMember },
+  bookings:     { table: 'bookings',     toUi: rowToBooking },
+  transactions: { table: 'transactions', toUi: rowToFinance },
+  pool_tables:  { table: 'pool_tables',  toUi: rowToTable },
+};
+
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const nowTime = () => new Date().toTimeString().slice(0, 5);
+const uid = () => `local-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+// Distinguish "no internet" (retry later) from a real data error (drop the op).
+function isNetworkError(err) {
+  if (!err) return true;
+  if (err.code) return false; // Postgres / PostgREST error code => real data error
+  const msg = String(err.message || err).toLowerCase();
+  return (
+    msg.includes('network') || msg.includes('fetch') || msg.includes('timeout') ||
+    msg.includes('failed') || msg.includes('offline') || msg.includes('connection')
+  );
+}
 
 export function ShotsProvider({ children }) {
   const { session } = useAuth();
@@ -81,102 +107,186 @@ export function ShotsProvider({ children }) {
   const [finance, setFinance] = useState([]);
   const [ready, setReady] = useState(false);
   const [offline, setOffline] = useState(false);
+  const [businessName, setBusinessName] = useState('');
+  const [pending, setPending] = useState(0);   // queued offline changes
+  const [syncing, setSyncing] = useState(false);
 
-  const reload = useCallback(async () => {
-    if (!businessId) return;
-    const [t, m, b, f] = await Promise.all([
-      supabase.from('pool_tables').select('*').order('number', { ascending: true }),
-      supabase.from('members').select('*').order('created_at', { ascending: true }),
-      supabase.from('bookings').select('*').order('date', { ascending: true }),
-      supabase.from('transactions').select('*').order('date', { ascending: true }),
-    ]);
-    setTables((t.data || []).map(rowToTable));
-    setMembers((m.data || []).map(rowToMember));
-    setBookings((b.data || []).map(rowToBooking));
-    setFinance((f.data || []).map(rowToFinance));
-    setReady(true);
-  }, [businessId]);
+  const outboxRef = useRef([]);
+  const flushingRef = useRef(false);
+  const membersRef = useRef([]);
+  membersRef.current = members;
+  const businessIdRef = useRef(businessId);
+  businessIdRef.current = businessId;
 
-  // Initial load whenever the signed-in business changes.
-  // Offline-friendly: hydrate instantly from the local snapshot, then refresh
-  // from Supabase when reachable. If the refresh fails (no internet) we keep the
-  // cached copy on screen and flag `offline`.
+  const setterFor = useCallback((entity) => ({
+    members: setMembers, bookings: setBookings, transactions: setFinance, pool_tables: setTables,
+  }[entity]), []);
+
+  // Persist the outbox to disk + update the pending counter.
+  const persistOutbox = useCallback(async () => {
+    setPending(outboxRef.current.length);
+    if (businessIdRef.current) await setCache(`outbox:${businessIdRef.current}`, outboxRef.current);
+  }, []);
+
+  // ---- Server pull (offline-safe) -----------------------------------------
+  const pullFromServer = useCallback(async () => {
+    const bid = businessIdRef.current;
+    if (!bid) return false;
+    try {
+      const [t, m, b, f, bs] = await Promise.all([
+        supabase.from('pool_tables').select('*').order('number', { ascending: true }),
+        supabase.from('members').select('*').order('created_at', { ascending: true }),
+        supabase.from('bookings').select('*').order('date', { ascending: true }),
+        supabase.from('transactions').select('*').order('date', { ascending: true }),
+        supabase.from('business_settings').select('profile').eq('business_id', bid).maybeSingle(),
+      ]);
+      if (t.error || m.error || b.error || f.error) { setOffline(true); return false; }
+      setTables((t.data || []).map(rowToTable));
+      setMembers((m.data || []).map(rowToMember));
+      setBookings((b.data || []).map(rowToBooking));
+      setFinance((f.data || []).map(rowToFinance));
+      setBusinessName(bs?.data?.profile?.name || '');
+      setOffline(false);
+      setReady(true);
+      return true;
+    } catch (e) {
+      setOffline(true);
+      return false;
+    }
+  }, []);
+
+  // ---- Outbox flush --------------------------------------------------------
+  // Returns true if the queue drained (fully synced), false if it stopped
+  // because the network is unreachable.
+  const flush = useCallback(async () => {
+    if (flushingRef.current) return false;
+    if (!businessIdRef.current || outboxRef.current.length === 0) return true;
+    flushingRef.current = true;
+    let online = true;
+    try {
+      while (outboxRef.current.length > 0) {
+        const op = outboxRef.current[0];
+        const cfg = CFG[op.entity];
+        let result;
+        try {
+          if (op.kind === 'insert') {
+            result = await supabase.from(cfg.table).insert(op.row).select().single();
+          } else if (op.kind === 'update') {
+            result = await supabase.from(cfg.table).update(op.patch).eq('id', op.id).select().maybeSingle();
+          } else {
+            result = await supabase.from(cfg.table).delete().eq('id', op.id);
+          }
+        } catch (e) {
+          result = { error: e };
+        }
+        const err = result?.error;
+        if (err) {
+          if (isNetworkError(err)) { online = false; break; }
+          // Real data error (constraint/validation): drop the op so it doesn't
+          // block everything behind it.
+          console.error('sync: dropping bad op', op, err);
+          outboxRef.current = outboxRef.current.slice(1);
+          await persistOutbox();
+          continue;
+        }
+        if (op.kind === 'insert' && result.data) {
+          const ui = cfg.toUi(result.data);
+          setterFor(op.entity)((arr) => arr.map((x) => (x.id === op.tempId ? ui : x)));
+        }
+        outboxRef.current = outboxRef.current.slice(1);
+        await persistOutbox();
+      }
+    } finally {
+      flushingRef.current = false;
+    }
+    if (!online) setOffline(true);
+    return online && outboxRef.current.length === 0;
+  }, [persistOutbox, setterFor]);
+
+  // Full sync: push queued writes; if drained, pull fresh server state.
+  const sync = useCallback(async () => {
+    if (!businessIdRef.current) return false;
+    setSyncing(true);
+    try {
+      const drained = await flush();
+      if (drained) await pullFromServer();
+      return drained;
+    } finally {
+      setSyncing(false);
+    }
+  }, [flush, pullFromServer]);
+
+  const reload = sync; // keep the old name working for callers
+
+  // ---- Initial load: hydrate cache, load outbox, then sync ----------------
   useEffect(() => {
     if (!businessId) {
-      setTables([]); setMembers([]); setBookings([]); setFinance([]); setReady(false);
+      setTables([]); setMembers([]); setBookings([]); setFinance([]);
+      setReady(false); outboxRef.current = []; setPending(0);
       return;
     }
     let active = true;
     (async () => {
-      // 1) Instant hydrate from the last saved snapshot.
       const cached = await getCache(`data:${businessId}`);
       if (active && cached) {
         setTables(cached.tables || []);
         setMembers(cached.members || []);
         setBookings(cached.bookings || []);
         setFinance(cached.finance || []);
+        setBusinessName(cached.businessName || '');
         setReady(true);
       }
-      // 2) Refresh from Supabase if it's reachable.
-      try {
-        const [t, m, b, f] = await Promise.all([
-          supabase.from('pool_tables').select('*').order('number', { ascending: true }),
-          supabase.from('members').select('*').order('created_at', { ascending: true }),
-          supabase.from('bookings').select('*').order('date', { ascending: true }),
-          supabase.from('transactions').select('*').order('date', { ascending: true }),
-        ]);
-        if (!active) return;
-        if (t.error || m.error || b.error || f.error) {
-          // Reachable but errored (commonly offline) — keep the cached copy.
-          setOffline(true);
-          setReady(true);
-          return;
-        }
-        setTables((t.data || []).map(rowToTable));
-        setMembers((m.data || []).map(rowToMember));
-        setBookings((b.data || []).map(rowToBooking));
-        setFinance((f.data || []).map(rowToFinance));
-        setOffline(false);
-        setReady(true);
-      } catch (e) {
-        // Network threw — stay on cached data and mark offline.
-        if (active) { setOffline(true); setReady(true); }
-      }
+      outboxRef.current = (await getCache(`outbox:${businessId}`)) || [];
+      setPending(outboxRef.current.length);
+      if (active) await sync();
     })();
     return () => { active = false; };
-  }, [businessId]);
+  }, [businessId, sync]);
 
-  // Persist the latest snapshot so it's available next time there's no internet.
-  useEffect(() => {
-    if (!businessId || !ready) return;
-    setCache(`data:${businessId}`, { tables, members, bookings, finance });
-  }, [businessId, ready, tables, members, bookings, finance]);
-
-  // Live sync: subscribe to Postgres changes so anything the admin dashboard
-  // does (e.g. marking a table for maintenance) reflects in the app instantly.
-  // On any insert/update/delete for this business we re-fetch just that table.
+  // Re-sync when the network returns or the app comes back to the foreground.
   useEffect(() => {
     if (!businessId) return;
+    const unsub = NetInfo.addEventListener((state) => {
+      const connected = state.isConnected && state.isInternetReachable !== false;
+      if (connected) sync();
+      else setOffline(true);
+    });
+    const appSub = AppState.addEventListener('change', (s) => { if (s === 'active') sync(); });
+    return () => { if (typeof unsub === 'function') unsub(); appSub.remove(); };
+  }, [businessId, sync]);
 
+  // Persist a snapshot for offline viewing after each state change.
+  useEffect(() => {
+    if (!businessId || !ready) return;
+    setCache(`data:${businessId}`, { tables, members, bookings, finance, businessName });
+  }, [businessId, ready, tables, members, bookings, finance, businessName]);
+
+  // Live sync: reflect changes made elsewhere (admin dashboard, other staff).
+  // Skipped while we have unsynced local changes so it can't clobber them.
+  useEffect(() => {
+    if (!businessId) return;
     const refetch = {
       pool_tables: async () => {
+        if (outboxRef.current.length) return;
         const { data } = await supabase.from('pool_tables').select('*').order('number', { ascending: true });
         setTables((data || []).map(rowToTable));
       },
       members: async () => {
+        if (outboxRef.current.length) return;
         const { data } = await supabase.from('members').select('*').order('created_at', { ascending: true });
         setMembers((data || []).map(rowToMember));
       },
       bookings: async () => {
+        if (outboxRef.current.length) return;
         const { data } = await supabase.from('bookings').select('*').order('date', { ascending: true });
         setBookings((data || []).map(rowToBooking));
       },
       transactions: async () => {
+        if (outboxRef.current.length) return;
         const { data } = await supabase.from('transactions').select('*').order('date', { ascending: true });
         setFinance((data || []).map(rowToFinance));
       },
     };
-
     const channel = supabase.channel(`shots-rt-${businessId}`);
     Object.keys(refetch).forEach((table) => {
       channel.on(
@@ -186,63 +296,69 @@ export function ShotsProvider({ children }) {
       );
     });
     channel.subscribe();
-
     return () => { supabase.removeChannel(channel); };
   }, [businessId]);
 
-  // ---- Tables --------------------------------------------------------------
-  const updateTable = useCallback(async (id, patch) => {
-    // Optimistic: reflect the change instantly, then persist and reconcile.
-    let prev = null;
-    setTables((arr) => arr.map((t) => {
-      if (t.id === id) { prev = t; return { ...t, ...patch }; }
-      return t;
-    }));
-    const { data: updated, error } = await supabase
-      .from('pool_tables').update(toRow(patch, TABLE_KEYS)).eq('id', id).select().single();
-    if (error) {
-      console.error('updateTable', error);
-      if (prev) setTables((arr) => arr.map((t) => (t.id === id ? prev : t))); // roll back
-      throw error;
-    }
-    setTables((arr) => arr.map((t) => (t.id === id ? rowToTable(updated) : t)));
-  }, []);
+  // ---- Local-first mutation primitives ------------------------------------
+  const localInsert = useCallback((entity, uiObj, row, tempId) => {
+    setterFor(entity)((arr) => [...arr, uiObj]);
+    outboxRef.current = [...outboxRef.current, { opId: uid(), entity, kind: 'insert', tempId, row }];
+    persistOutbox();
+    flush();
+  }, [persistOutbox, flush, setterFor]);
 
-  // ---- Members -------------------------------------------------------------
+  const localUpdate = useCallback((entity, id, uiPatch, rowPatch) => {
+    setterFor(entity)((arr) => arr.map((x) => (x.id === id ? { ...x, ...uiPatch } : x)));
+    // If this row was created offline and hasn't synced yet, fold the change
+    // into its pending insert (so no temp-id reconciliation is ever needed).
+    const ins = outboxRef.current.find((o) => o.entity === entity && o.kind === 'insert' && o.tempId === id);
+    if (ins) {
+      ins.row = { ...ins.row, ...rowPatch };
+    } else {
+      const prevUpdate = [...outboxRef.current].reverse().find((o) => o.entity === entity && o.kind === 'update' && o.id === id);
+      if (prevUpdate) prevUpdate.patch = { ...prevUpdate.patch, ...rowPatch };
+      else outboxRef.current = [...outboxRef.current, { opId: uid(), entity, kind: 'update', id, patch: rowPatch }];
+    }
+    persistOutbox();
+    flush();
+  }, [persistOutbox, flush, setterFor]);
+
+  const localDelete = useCallback((entity, id) => {
+    setterFor(entity)((arr) => arr.filter((x) => x.id !== id));
+    const hadInsert = outboxRef.current.some((o) => o.entity === entity && o.kind === 'insert' && o.tempId === id);
+    if (hadInsert) {
+      // Never synced — drop the insert (and anything else for this temp id).
+      outboxRef.current = outboxRef.current.filter((o) => !(o.entity === entity && (o.tempId === id || o.id === id)));
+    } else {
+      outboxRef.current = outboxRef.current.filter((o) => !(o.entity === entity && o.kind === 'update' && o.id === id));
+      outboxRef.current = [...outboxRef.current, { opId: uid(), entity, kind: 'delete', id }];
+    }
+    persistOutbox();
+    flush();
+  }, [persistOutbox, flush, setterFor]);
+
+  // ---- Public API (offline-first; resolves immediately) -------------------
+  const updateTable = useCallback(async (id, patch) => {
+    localUpdate('pool_tables', id, patch, toRow(patch, TABLE_KEYS));
+  }, [localUpdate]);
+
   const addMember = useCallback(async (data) => {
-    const id = data.id || generateMemberId(data.idCardNumber, members.map((m) => m.id));
-    const row = { ...toRow(data, MEMBER_KEYS), id, business_id: businessId };
-    const { data: inserted, error } = await supabase.from('members').insert(row).select().single();
-    if (error) { console.error('addMember', error); throw error; }
-    const m = rowToMember(inserted);
-    setMembers((arr) => [...arr, m]);
-    return m;
-  }, [businessId, members]);
+    const id = data.id || generateMemberId(data.idCardNumber, membersRef.current.map((m) => m.id));
+    const uiObj = { ...data, id };
+    const row = { ...toRow(data, MEMBER_KEYS), id, business_id: businessIdRef.current };
+    localInsert('members', uiObj, row, id);
+    return uiObj;
+  }, [localInsert]);
 
   const updateMember = useCallback(async (id, patch) => {
-    let prev = null;
-    setMembers((arr) => arr.map((m) => {
-      if (m.id === id) { prev = m; return { ...m, ...patch }; }
-      return m;
-    }));
-    const { data: updated, error } = await supabase
-      .from('members').update(toRow(patch, MEMBER_KEYS)).eq('id', id).select().single();
-    if (error) {
-      console.error('updateMember', error);
-      if (prev) setMembers((arr) => arr.map((m) => (m.id === id ? prev : m)));
-      throw error;
-    }
-    setMembers((arr) => arr.map((m) => (m.id === id ? rowToMember(updated) : m)));
-    return rowToMember(updated);
-  }, []);
+    localUpdate('members', id, patch, toRow(patch, MEMBER_KEYS));
+    return { id, ...patch };
+  }, [localUpdate]);
 
   const deleteMember = useCallback(async (id) => {
-    const { error } = await supabase.from('members').delete().eq('id', id);
-    if (error) { console.error('deleteMember', error); return; }
-    setMembers((arr) => arr.filter((m) => m.id !== id));
-  }, []);
+    localDelete('members', id);
+  }, [localDelete]);
 
-  // ---- Bookings ------------------------------------------------------------
   const addBooking = useCallback(async (data) => {
     const payload = { ...data };
     if (!payload.memberName && payload.members) {
@@ -250,14 +366,14 @@ export function ShotsProvider({ children }) {
     }
     if (!payload.memberId && payload.members?.[0]) payload.memberId = payload.members[0].id;
     if (payload.members) payload.players = payload.members.length || 1;
-    const row = { ...toRow(payload, BOOKING_KEYS), business_id: businessId };
+    if (payload.status == null) payload.status = 'Active';
+    const tempId = uid();
+    const uiObj = { ...payload, id: tempId };
+    const row = { ...toRow(payload, BOOKING_KEYS), business_id: businessIdRef.current };
     if (row.status == null) row.status = 'Active';
-    const { data: inserted, error } = await supabase.from('bookings').insert(row).select().single();
-    if (error) { console.error('addBooking', error); throw error; }
-    const b = rowToBooking(inserted);
-    setBookings((arr) => [...arr, b]);
-    return b;
-  }, [businessId]);
+    localInsert('bookings', uiObj, row, tempId);
+    return uiObj;
+  }, [localInsert]);
 
   const updateBooking = useCallback(async (id, patch) => {
     const payload = { ...patch };
@@ -266,29 +382,14 @@ export function ShotsProvider({ children }) {
       payload.memberId = payload.members[0]?.id || null;
       payload.players = payload.members.length || 1;
     }
-    let prev = null;
-    setBookings((arr) => arr.map((b) => {
-      if (b.id === id) { prev = b; return { ...b, ...payload }; }
-      return b;
-    }));
-    const { data: updated, error } = await supabase
-      .from('bookings').update(toRow(payload, BOOKING_KEYS)).eq('id', id).select().single();
-    if (error) {
-      console.error('updateBooking', error);
-      if (prev) setBookings((arr) => arr.map((b) => (b.id === id ? prev : b)));
-      throw error;
-    }
-    setBookings((arr) => arr.map((b) => (b.id === id ? rowToBooking(updated) : b)));
-    return rowToBooking(updated);
-  }, []);
+    localUpdate('bookings', id, payload, toRow(payload, BOOKING_KEYS));
+    return { id, ...payload };
+  }, [localUpdate]);
 
   const deleteBooking = useCallback(async (id) => {
-    const { error } = await supabase.from('bookings').delete().eq('id', id);
-    if (error) { console.error('deleteBooking', error); return; }
-    setBookings((arr) => arr.filter((b) => b.id !== id));
-  }, []);
+    localDelete('bookings', id);
+  }, [localDelete]);
 
-  // ---- Finance / transactions ---------------------------------------------
   const addFinanceEntry = useCallback(async (data) => {
     const withDefaults = {
       type: 'In',
@@ -296,22 +397,23 @@ export function ShotsProvider({ children }) {
       time: data.time || nowTime(),
       ...data,
     };
-    const row = { ...toRow(withDefaults, FINANCE_KEYS), business_id: businessId };
-    const { data: inserted, error } = await supabase.from('transactions').insert(row).select().single();
-    if (error) { console.error('addFinanceEntry', error); throw error; }
-    const f = rowToFinance(inserted);
-    setFinance((arr) => [...arr, f]);
-    return f;
-  }, [businessId]);
+    const tempId = uid();
+    const uiObj = { ...withDefaults, id: tempId };
+    const row = { ...toRow(withDefaults, FINANCE_KEYS), business_id: businessIdRef.current };
+    localInsert('transactions', uiObj, row, tempId);
+    return uiObj;
+  }, [localInsert]);
 
   const value = useMemo(() => ({
-    tables, members, bookings, finance, ready, offline, reload,
+    tables, members, bookings, finance, ready, offline, businessName, pending, syncing,
+    reload, sync,
     updateTable,
     addMember, updateMember, deleteMember,
     addBooking, updateBooking, deleteBooking,
     addFinanceEntry,
   }), [
-    tables, members, bookings, finance, ready, offline, reload,
+    tables, members, bookings, finance, ready, offline, businessName, pending, syncing,
+    reload, sync,
     updateTable,
     addMember, updateMember, deleteMember,
     addBooking, updateBooking, deleteBooking,
