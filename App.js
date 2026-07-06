@@ -65,7 +65,8 @@ export default function App() {
 }
 
 // Small toast-style pill reflecting offline / queued / syncing state.
-// Positioned as an overlay so it never disturbs screen header layouts.
+// Pinned to the top as an overlay so it never covers the bottom tab bar or the
+// on-screen confirmation buttons that live above it.
 function OfflineBanner() {
   const { offline, pending, syncing } = useShots();
   const insets = useSafeAreaInsets();
@@ -90,7 +91,7 @@ function OfflineBanner() {
       pointerEvents="none"
       style={{
         position: 'absolute',
-        bottom: (insets.bottom || 0) + 86,
+        top: (insets.top || 0) + 8,
         left: 0,
         right: 0,
         alignItems: 'center',

@@ -53,7 +53,15 @@ const MembershipVirtualCard = ({ member, compact, businessName }) => {
         <View style={styles.middleRow}>
           <View style={styles.photoWrap}>
             {member.photo ? (
-              <Image source={typeof member.photo === 'string' ? { uri: member.photo } : member.photo} style={styles.photo} />
+              <Image
+                source={typeof member.photo === 'string' ? { uri: member.photo } : member.photo}
+                style={styles.photo}
+                resizeMode="cover"
+                // On Android the default `resize` method sub-samples a large source
+                // down into this small 64px frame and looks blurry; `scale` keeps
+                // the avatar crisp (renders the full bitmap and hardware-scales it).
+                resizeMethod="scale"
+              />
             ) : (
               <View style={[styles.photo, styles.photoFallback]}>
                 <Text style={styles.photoInitials}>{initials}</Text>

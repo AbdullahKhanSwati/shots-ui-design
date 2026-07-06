@@ -34,11 +34,12 @@ const SplashScreen = ({ navigation }) => {
   }, [scale, opacity, rotate, dotsAnim]);
 
   // Route once the auth session has been restored (or confirmed absent).
-  // A signed-in staff member skips straight to the workspace.
+  // A signed-in staff member skips straight to the workspace; everyone else
+  // goes directly to the login screen (the workspace picker is skipped).
   useEffect(() => {
     if (loading) return;
     const timer = setTimeout(
-      () => navigation.replace(session ? 'Main' : 'BusinessSelection'),
+      () => navigation.replace(session ? 'Main' : 'Login'),
       1200
     );
     return () => clearTimeout(timer);

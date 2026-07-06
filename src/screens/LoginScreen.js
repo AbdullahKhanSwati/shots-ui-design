@@ -16,6 +16,7 @@ import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { colors, gradients, typography, spacing, borderRadius, shadows } from '../styles/theme';
 import GradientButton from '../components/GradientButton';
 import { useAuth } from '../context/AuthContext';
+import { supabase } from '../lib/supabase';
 
 const LoginScreen = ({ navigation, route }) => {
   const { login } = useAuth();
@@ -24,6 +25,25 @@ const LoginScreen = ({ navigation, route }) => {
   const [password, setPassword] = useState(business?.defaultPassword || '');
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // The workspace picker is skipped, so no business is handed to us via params.
+  // Prefill the Shots staff credentials directly (only while the fields are
+  // still empty, so we never clobber something the user has typed).
+  useEffect(() => {
+    if (business) return;
+    let active = true;
+    (async () => {
+      const { data } = await supabase
+        .from('businesses')
+        .select('default_email, default_password')
+        .eq('id', 'shots')
+        .maybeSingle();
+      if (!active || !data) return;
+      setEmail((prev) => prev || data.default_email || '');
+      setPassword((prev) => prev || data.default_password || '');
+    })();
+    return () => { active = false; };
+  }, [business]);
 
   const fade = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(30)).current;
