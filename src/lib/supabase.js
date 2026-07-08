@@ -6,9 +6,9 @@ import { createClient } from '@supabase/supabase-js';
 // the client — every table is protected by Row Level Security + the
 // current_business_id() tenant policy, so a signed-in staff member can only ever
 // read/write their own business's rows.
-const SUPABASE_URL = 'https://ejrqnrccfjmmlbjnpurw.supabase.co';
+const SUPABASE_URL = 'https://ldzfbkngjeiwnotlaogf.supabase.co';
 const SUPABASE_ANON_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVqcnFucmNjZmptbWxiam5wdXJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1Njg1MDUsImV4cCI6MjA5NjE0NDUwNX0.0ewnDI33U-bLDWu9cPI4WX57AzIFLsyVu5gNpJ4774I';
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxkemZia25namVpd25vdGxhb2dmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4Mzc1NjksImV4cCI6MjA5ODQxMzU2OX0.ipJlwfNM7MoldGMchofVTj2SF-2VhRkY1uDJuqa9pdk';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
