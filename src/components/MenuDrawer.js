@@ -6,7 +6,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, gradients, typography, spacing, borderRadius, shadows } from '../styles/theme';
 import { useAuth } from '../context/AuthContext';
 
-const ADMIN_URL = 'https://sadozai-admin.vercel.app/login';
+// Deep-link straight to the Shots dashboard. If a browser session exists the
+// user lands there directly; if not, RequireAuth bounces them to /login.
+const ADMIN_URL = 'https://admin.managemyclub.app/admin/dashboard';
 
 const MenuDrawer = ({ navigation }) => {
   const insets = useSafeAreaInsets();
