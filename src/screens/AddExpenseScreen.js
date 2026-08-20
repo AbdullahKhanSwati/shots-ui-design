@@ -20,6 +20,22 @@ import ScreenHeader from '../components/ScreenHeader';
 
 const NO_TABLE = -1;
 
+// Local YYYY-MM-DD — toISOString() alone would roll back a day for evening
+// entries in +05:00, so the expense would land on the wrong date.
+const localDate = (d = new Date()) => {
+  const t = new Date(d);
+  t.setMinutes(t.getMinutes() - t.getTimezoneOffset());
+  return t.toISOString().slice(0, 10);
+};
+const daysAgo = (n) => {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return localDate(d);
+};
+const isValidDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(new Date(`${v}T00:00:00`).getTime());
+const prettyDate = (v) =>
+  new Date(`${v}T00:00:00`).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
+
 const AddExpenseScreen = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
   const { tables, finance, addFinanceEntry } = useShots();
@@ -31,6 +47,7 @@ const AddExpenseScreen = ({ navigation, route }) => {
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('Repair');
+  const [date, setDate] = useState(localDate);
   const [saving, setSaving] = useState(false);
 
   // Always land on the list when the tab is opened.
@@ -51,6 +68,7 @@ const AddExpenseScreen = ({ navigation, route }) => {
     setAmount('');
     setDescription('');
     setCategory('Repair');
+    setDate(localDate());
     setTableId(initialTableId ?? NO_TABLE);
   };
 
@@ -63,6 +81,9 @@ const AddExpenseScreen = ({ navigation, route }) => {
     if (!amount || !description) {
       return Alert.alert('Missing info', 'Amount and description are required.');
     }
+    if (!isValidDate(date)) {
+      return Alert.alert('Check the date', 'Enter the expense date as YYYY-MM-DD, e.g. 2026-08-20.');
+    }
     if (saving) return;
     setSaving(true);
     try {
@@ -71,6 +92,7 @@ const AddExpenseScreen = ({ navigation, route }) => {
         category,
         amount: Number(amount),
         description,
+        date,
         table: tableId === NO_TABLE ? null : selectedTable?.number ?? null,
       });
       resetForm();
@@ -214,6 +236,34 @@ const AddExpenseScreen = ({ navigation, route }) => {
               />
             </View>
 
+            <Text style={styles.fieldLabel}>Date</Text>
+            <View style={styles.dateRow}>
+              <Ionicons name="calendar-outline" size={18} color={colors.primary} />
+              <TextInput
+                value={date}
+                onChangeText={setDate}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor={colors.textMuted}
+                maxLength={10}
+                autoCorrect={false}
+                style={styles.dateInput}
+              />
+            </View>
+            <View style={styles.quickDateRow}>
+              {[{ label: 'Today', value: daysAgo(0) }, { label: 'Yesterday', value: daysAgo(1) }].map((q) => (
+                <Pressable
+                  key={q.label}
+                  onPress={() => setDate(q.value)}
+                  style={[styles.quickDate, date === q.value && styles.quickDateActive]}
+                >
+                  <Text style={[styles.quickDateText, date === q.value && { color: colors.white }]}>{q.label}</Text>
+                </Pressable>
+              ))}
+              <Text style={styles.datePreview} numberOfLines={1}>
+                {isValidDate(date) ? prettyDate(date) : 'Enter a valid date'}
+              </Text>
+            </View>
+
             <Text style={styles.fieldLabel}>Category</Text>
             <View style={styles.catRow}>
               {expenseCategories.map((c) => (
@@ -339,6 +389,48 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: colors.text,
     paddingVertical: 0,
+  },
+  dateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.surfaceAlt,
+    paddingHorizontal: spacing.md,
+    height: 50,
+    borderRadius: borderRadius.md,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+  },
+  dateInput: {
+    flex: 1,
+    ...typography.body,
+    color: colors.text,
+    fontWeight: '700',
+    paddingVertical: 0,
+  },
+  quickDateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  quickDate: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: borderRadius.round,
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+  },
+  quickDateActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  quickDateText: { ...typography.caption, color: colors.text, fontWeight: '700', textTransform: 'none', letterSpacing: 0 },
+  datePreview: {
+    ...typography.caption,
+    color: colors.textLight,
+    flex: 1,
+    textAlign: 'right',
+    textTransform: 'none',
+    letterSpacing: 0,
   },
   catRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   catChip: {

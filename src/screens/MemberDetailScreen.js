@@ -31,7 +31,7 @@ import GradientButton from '../components/GradientButton';
 
 const MemberDetailScreen = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
-  const { members, bookings, updateMember, addFinanceEntry, businessName } = useShots();
+  const { members, bookings, updateMember, deleteMember, addFinanceEntry, businessName } = useShots();
   const id = route.params?.memberId;
   const member = members.find((m) => m.id === id);
   const visits = bookings.filter((b) => b.memberId === id);
@@ -49,6 +49,7 @@ const MemberDetailScreen = ({ navigation, route }) => {
   const [editOpen, setEditOpen] = useState(false);
   const [edit, setEdit] = useState({ name: '', phone: '', email: '', idCardNumber: '', type: 'Premium', expiryDate: '' });
   const [savingEdit, setSavingEdit] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // Resolve viewable URLs for the (private) ID card images.
   const [cnicUrls, setCnicUrls] = useState({ front: null, back: null });
@@ -264,6 +265,33 @@ const MemberDetailScreen = ({ navigation, route }) => {
     );
   };
 
+  // Permanent removal — the record disappears from the club list for everyone.
+  const handleDelete = () => {
+    Alert.alert(
+      'Delete member?',
+      `${member.name} (${member.id}) will be removed permanently. Past bookings stay in your history. This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            if (deleting) return;
+            setDeleting(true);
+            try {
+              await deleteMember(member.id);
+              navigation.goBack();
+            } catch (e) {
+              Alert.alert('Could not delete', e?.message || 'Please try again.');
+            } finally {
+              setDeleting(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const handleSuspend = () => {
     Alert.alert(
       'Suspend member?',
@@ -461,6 +489,26 @@ const MemberDetailScreen = ({ navigation, route }) => {
               </View>
             ))
           )}
+        </View>
+
+        {/* Danger zone — permanent removal */}
+        <View style={styles.dangerSection}>
+          <Text style={styles.dangerTitle}>Danger Zone</Text>
+          <Text style={styles.dangerHint}>
+            Deleting removes {member.name} from the members list permanently. Use "Suspend" instead if you only want to
+            deactivate the membership.
+          </Text>
+          <TouchableOpacity
+            onPress={handleDelete}
+            disabled={deleting}
+            style={[styles.dangerBtn, deleting && { opacity: 0.6 }]}
+            activeOpacity={0.85}
+          >
+            {deleting
+              ? <ActivityIndicator size="small" color={colors.error} />
+              : <Ionicons name="trash-outline" size={18} color={colors.error} />}
+            <Text style={styles.dangerBtnText}>{deleting ? 'Deleting…' : 'Delete Member'}</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
 
@@ -868,6 +916,33 @@ const styles = StyleSheet.create({
   visitTitle: { ...typography.bodySmall, color: colors.text, fontWeight: '700' },
   visitMeta: { ...typography.caption, color: colors.textLight, marginTop: 2, textTransform: 'none', letterSpacing: 0 },
   visitAmt: { ...typography.bodySmall, color: colors.text, fontWeight: '800' },
+  dangerSection: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.xl,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.errorSoft,
+    ...shadows.sm,
+  },
+  dangerTitle: { ...typography.label, color: colors.error, marginBottom: spacing.xs },
+  dangerHint: {
+    ...typography.bodySmall,
+    color: colors.textLight,
+    marginBottom: spacing.md,
+  },
+  dangerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    height: 48,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.errorSoft,
+    borderWidth: 1.5,
+    borderColor: colors.error,
+  },
+  dangerBtnText: { ...typography.body, color: colors.error, fontWeight: '800' },
   footer: {
     flexDirection: 'row',
     gap: spacing.sm,

@@ -115,6 +115,8 @@ export function ShotsProvider({ children }) {
   const flushingRef = useRef(false);
   const membersRef = useRef([]);
   membersRef.current = members;
+  const bookingsRef = useRef([]);
+  bookingsRef.current = bookings;
   const businessIdRef = useRef(businessId);
   businessIdRef.current = businessId;
 
@@ -356,8 +358,14 @@ export function ShotsProvider({ children }) {
   }, [localUpdate]);
 
   const deleteMember = useCallback(async (id) => {
+    // bookings.member_id is a FK to members(id), so detach the member's visits
+    // first — otherwise the server rejects the delete and the row reappears on
+    // the next reload. member_name stays on the booking, so history is intact.
+    bookingsRef.current
+      .filter((b) => b.memberId === id)
+      .forEach((b) => localUpdate('bookings', b.id, { memberId: null }, { member_id: null }));
     localDelete('members', id);
-  }, [localDelete]);
+  }, [localDelete, localUpdate]);
 
   const addBooking = useCallback(async (data) => {
     const payload = { ...data };

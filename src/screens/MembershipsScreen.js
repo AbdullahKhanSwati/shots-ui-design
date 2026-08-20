@@ -99,16 +99,6 @@ const MembershipsScreen = ({ navigation }) => {
           </View>
         }
       />
-
-      <TouchableOpacity
-        style={[styles.fab, { bottom: 24 + insets.bottom }]}
-        activeOpacity={0.9}
-        onPress={() => navigation.navigate('AddMember')}
-      >
-        <LinearGradient colors={gradients.brand} style={styles.fabGrad}>
-          <Ionicons name="person-add" size={22} color={colors.white} />
-        </LinearGradient>
-      </TouchableOpacity>
     </View>
   );
 };
@@ -187,18 +177,6 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   emptyText: { ...typography.bodySmall, color: colors.textLight },
-  fab: {
-    position: 'absolute',
-    right: spacing.lg,
-    width: 58, height: 58,
-    borderRadius: 29,
-    ...shadows.red,
-  },
-  fabGrad: {
-    width: '100%', height: '100%',
-    borderRadius: 29,
-    alignItems: 'center', justifyContent: 'center',
-  },
 });
 
 export default MembershipsScreen;
