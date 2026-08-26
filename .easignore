@@ -1,0 +1,29 @@
+# .easignore replaces .gitignore for the EAS build archive,
+# so the usual ignores must be repeated here.
+node_modules/
+.git/
+.expo/
+dist/
+web-build/
+npm-debug.*
+.env*.local
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Next.js / v0 web leftovers — not used by the React Native app
+public/
+styles/
+components/
+next.config.mjs
+next-env.d.ts
+postcss.config.mjs
+components.json
+
+# SQL migrations
+supabase/
+
+# local backup
+app.json.bak

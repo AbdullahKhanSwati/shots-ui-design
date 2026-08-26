@@ -22,14 +22,7 @@
         "backgroundColor": "#000000"
       },
       "permissions": [
-        "android.permission.RECORD_AUDIO",
-        "android.permission.CAMERA",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
-        "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.READ_MEDIA_VIDEO",
-        "android.permission.READ_MEDIA_AUDIO"
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -67,13 +60,13 @@
         }
       ]
     ],
-    "owner": "inam034993",
+    "owner": "zerotyping",
     "runtimeVersion": {
       "policy": "appVersion"
     },
     "extra": {
       "eas": {
-        "projectId": "0821ce48-de92-4934-afcb-5320c1c9c11b"
+        "projectId": "fa2ddb45-2798-47f6-88ab-215cbded8a1b"
       }
     }
   }
