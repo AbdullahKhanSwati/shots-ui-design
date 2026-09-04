@@ -17,21 +17,17 @@ import { useShots } from '../store/ShotsStore';
 import TableCard from '../components/TableCard';
 import SearchBar from '../components/SearchBar';
 import FilterChips from '../components/FilterChips';
+import { PRICING_MODES } from '../data/pricing';
 
 const STATUS_OPTIONS = [
   { value: 'All', label: 'All', icon: 'apps' },
   { value: 'Available', label: 'Available', icon: 'checkmark-circle' },
   { value: 'Maintenance', label: 'Maintenance', icon: 'construct' },
 ];
-const TYPE_OPTIONS = [
-  { value: 'All', label: 'All Types' },
-  { value: 'Pool', label: 'Pool' },
-  { value: 'Snooker', label: 'Snooker' },
-];
 
 const TablesScreen = ({ navigation }) => {
   const insets = useSafeAreaInsets();
-  const { tables, bookings, updateBooking } = useShots();
+  const { tables, bookings, tableTypes, pricingRules, updateBooking } = useShots();
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('All');
   const [type, setType] = useState('All');
@@ -43,6 +39,21 @@ const TablesScreen = ({ navigation }) => {
       setTick((t) => t + 1);
     }, [])
   );
+
+  // Table types come from the DB (admin → Tables → Manage types). Any type that
+  // is still in use by a table is kept in the list even if it was renamed away,
+  // so those tables never become unreachable through the filter.
+  const typeOptions = useMemo(() => {
+    const names = [];
+    tableTypes.forEach((t) => { if (t.name && !names.includes(t.name)) names.push(t.name); });
+    tables.forEach((t) => { if (t.type && !names.includes(t.type)) names.push(t.type); });
+    return [{ value: 'All', label: 'All Types' }, ...names.map((n) => ({ value: n, label: n }))];
+  }, [tableTypes, tables]);
+
+  // Reset the filter if the selected type disappears (renamed/deleted in admin).
+  React.useEffect(() => {
+    if (type !== 'All' && !typeOptions.some((o) => o.value === type)) setType('All');
+  }, [typeOptions, type]);
 
   const filtered = useMemo(() => {
     return tables.filter((t) => {
@@ -148,7 +159,9 @@ const TablesScreen = ({ navigation }) => {
 
           <View style={styles.filterStack}>
             <FilterChips label="Status" items={STATUS_OPTIONS} value={status} onChange={setStatus} compact />
-            <FilterChips label="Type" items={TYPE_OPTIONS} value={type} onChange={setType} compact />
+            {typeOptions.length > 1 ? (
+              <FilterChips label="Type" items={typeOptions} value={type} onChange={setType} compact />
+            ) : null}
           </View>
 
           <ScrollView
@@ -165,6 +178,7 @@ const TablesScreen = ({ navigation }) => {
                 <TableCard
                   key={t.id}
                   table={t}
+                  pricingRules={pricingRules}
                   delay={i * 50}
                   onPress={() => navigation.navigate('TableDetail', { tableId: t.id })}
                 />
@@ -241,6 +255,15 @@ const TablesScreen = ({ navigation }) => {
                           <Text style={styles.bookingDot}>•</Text>
                           <Ionicons name={b.isMember ? 'diamond' : 'person'} size={11} color={colors.textLight} />
                           <Text style={styles.bookingMetaText}>{b.isMember ? 'Member' : 'Guest'}</Text>
+                          {b.pricingMode ? (
+                            <>
+                              <Text style={styles.bookingDot}>•</Text>
+                              <Ionicons name="pricetag" size={11} color={colors.textLight} />
+                              <Text style={styles.bookingMetaText}>
+                                {(PRICING_MODES.find((m) => m.value === b.pricingMode) || {}).label || b.pricingMode}
+                              </Text>
+                            </>
+                          ) : null}
                         </View>
                         <View style={styles.bookingFootRow}>
                           <Text style={[styles.bookingAmt, cancelled && styles.cancelledText]}>Rs. {(b.amount || 0).toLocaleString()}</Text>

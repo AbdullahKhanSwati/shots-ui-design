@@ -13,7 +13,8 @@ npm-debug.*
 *.key
 *.mobileprovision
 
-# Next.js / v0 web leftovers — not used by the React Native app
+# Next.js / v0 web leftovers — not used by the React Native app.
+# Leading slash matters: unanchored "styles/" would also match src/styles/.
 /public/
 /styles/
 /components/
@@ -28,3 +29,4 @@ npm-debug.*
 # local backup
 /app.json.bak
 
+/builds/

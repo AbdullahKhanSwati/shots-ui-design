@@ -18,6 +18,11 @@ import { colors, typography, spacing, borderRadius, shadows } from '../styles/th
 import {
   intervalsForRange, bookedIntervalsFor, addMinutes,
 } from '../data/mockData';
+import {
+  PRICING_MODES, DEFAULT_MODE, modesForType, pickRule, priceOf, rulesFor,
+  computeCharge, gameMinutes, minMinutes, playersAllowed, ruleConstraints,
+  tierLabel, unitSuffix, minutesToLabel, slotsForMinutes,
+} from '../data/pricing';
 import { useShots } from '../store/ShotsStore';
 import GradientButton from '../components/GradientButton';
 import ScreenHeader from '../components/ScreenHeader';
@@ -34,10 +39,14 @@ const DURATIONS = [
 ];
 
 const MAX_MEMBERS = 4;
+const MAX_PLAYERS = 8;
+const modeMeta = (value) => PRICING_MODES.find((m) => m.value === value) || PRICING_MODES[0];
+// Quick picks for the per-minute mode; anything else goes in the free field.
+const MINUTE_PRESETS = [10, 15, 20, 30, 45, 60, 90];
 
 const BookingFormScreen = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
-  const { tables, members: memberList, bookings, addBooking, updateBooking } = useShots();
+  const { tables, members: memberList, bookings, pricingRules, addBooking, updateBooking } = useShots();
   const { tableId, date, startValue, startLabel, bookingId } = route.params || {};
   const table = tables.find((t) => t.id === tableId);
   const editing = !!bookingId;
@@ -52,6 +61,28 @@ const BookingFormScreen = ({ navigation, route }) => {
 
   const [duration, setDuration] = useState(initialDuration);
   const [isMember, setIsMember] = useState(existing ? existing.isMember !== false : true);
+
+  // ---- Pricing mode ------------------------------------------------------
+  // Which modes this table type is priced for is decided by the admin panel
+  // (Pricing page). Legacy tables with no rules keep the old hourly rates.
+  const availableModes = useMemo(
+    () => modesForType(pricingRules, table?.type),
+    [pricingRules, table?.type]
+  );
+  const [mode, setMode] = useState(existing?.pricingMode || DEFAULT_MODE);
+  const activeMode = useMemo(() => {
+    if (availableModes.length === 0) return 'hour';
+    return availableModes.some((m) => m.value === mode) ? mode : availableModes[0].value;
+  }, [availableModes, mode]);
+
+  const [players, setPlayers] = useState(() => Math.min(MAX_PLAYERS, Math.max(1, Number(existing?.players) || 2)));
+  const [games, setGames] = useState(() =>
+    existing?.pricingMode === 'game' ? Math.max(1, Math.round(Number(existing.units) || 1)) : 1
+  );
+  const [minuteInput, setMinuteInput] = useState(() =>
+    existing?.pricingMode === 'minute' ? String(existing.durationMinutes || 30) : '30'
+  );
+
   // New bookings start with no member selected; editing keeps the existing ones.
   const [members, setMembers] = useState(
     existing?.members?.slice(0, MAX_MEMBERS) || []
@@ -79,11 +110,57 @@ const BookingFormScreen = ({ navigation, route }) => {
   const effectiveDate  = existing?.date  || date;
   const effectiveStartLabel = startLabel || effectiveStart;
 
-  const endValue = useMemo(() => addMinutes(effectiveStart, duration.minutes), [effectiveStart, duration]);
-  const reservedIntervals = useMemo(
-    () => intervalsForRange(effectiveStart, duration.minutes / 60),
-    [effectiveStart, duration]
+  // The price option that fits this booking (player tier + mode).
+  const modeRules = useMemo(
+    () => rulesFor(pricingRules, table?.type, activeMode),
+    [pricingRules, table?.type, activeMode]
   );
+  const rule = useMemo(
+    () => pickRule(pricingRules, table?.type, activeMode, players),
+    [pricingRules, table?.type, activeMode, players]
+  );
+  // No rules configured for this type yet -> keep charging the table's own
+  // hourly rates, exactly as before the pricing modes were introduced.
+  const legacyPricing = availableModes.length === 0;
+
+  const requestedMinutes = useMemo(() => {
+    if (legacyPricing || activeMode === 'hour') return duration.minutes;
+    if (activeMode === 'minute') return Math.max(0, Math.round(Number(minuteInput) || 0));
+    return Math.max(1, games) * gameMinutes(rule);
+  }, [legacyPricing, activeMode, duration, minuteInput, games, rule]);
+
+  const charge = useMemo(() => {
+    if (legacyPricing) {
+      const legacyRate = Number(isMember ? table?.memberRate : table?.nonMemberRate) || 0;
+      return {
+        subtotal: Math.round((legacyRate * duration.minutes) / 60),
+        unitPrice: legacyRate,
+        units: Number((duration.minutes / 60).toFixed(2)),
+        durationMinutes: duration.minutes,
+        unitLabel: 'hr',
+        label: `Per hour · ${duration.label}`,
+        error: null,
+      };
+    }
+    return computeCharge({ mode: activeMode, rule, isMember, minutes: requestedMinutes, games });
+  }, [legacyPricing, activeMode, rule, isMember, requestedMinutes, games, duration, table]);
+
+  const billedMinutes = charge.durationMinutes || 0;
+
+  // Sessions are held in 15-minute slots, so a 25-minute booking blocks 30.
+  const endValue = useMemo(
+    () => addMinutes(effectiveStart, Math.max(15, billedMinutes)),
+    [effectiveStart, billedMinutes]
+  );
+  const reservedIntervals = useMemo(
+    () => intervalsForRange(effectiveStart, (slotsForMinutes(billedMinutes) * 15) / 60),
+    [effectiveStart, billedMinutes]
+  );
+
+  // Keep the player count consistent with the members actually on the booking.
+  React.useEffect(() => {
+    if (isMember && members.length > players) setPlayers(Math.min(MAX_PLAYERS, members.length));
+  }, [isMember, members.length, players]);
 
   // when editing, exclude this booking's own intervals from conflict detection
   const existingBooked = useMemo(() => {
@@ -109,8 +186,7 @@ const BookingFormScreen = ({ navigation, route }) => {
 
   const conflict = reservedIntervals.some((iv) => existingBooked.has(iv));
 
-  const rate = isMember ? table.memberRate : table.nonMemberRate;
-  const subtotal = Math.round((rate * duration.minutes) / 60);
+  const subtotal = charge.subtotal;
   const discountAmount =
     discountType === 'percent'
       ? Math.round(subtotal * (Number(discountValue || 0) / 100))
@@ -148,6 +224,21 @@ const BookingFormScreen = ({ navigation, route }) => {
     if (!isMember && !guestName) {
       return Alert.alert('Missing info', 'Please enter the guest name.');
     }
+    if (!legacyPricing && !rule) {
+      return Alert.alert(
+        'No price set',
+        `No ${activeMode} price is configured for ${table.type} tables. Set one in the admin panel under Pricing.`
+      );
+    }
+    if (rule && !playersAllowed(rule, players)) {
+      return Alert.alert(
+        'Players not allowed on this rate',
+        `The ${modeMeta(activeMode).label.toLowerCase()} rate for ${table.type} is ${ruleConstraints(rule)}. Change the player count or pick another pricing mode.`
+      );
+    }
+    if (billedMinutes <= 0) {
+      return Alert.alert('Missing duration', 'Enter how long this booking runs for.');
+    }
     if (saving) return;
 
     const discountPayload =
@@ -162,7 +253,7 @@ const BookingFormScreen = ({ navigation, route }) => {
       start: effectiveStart,
       end: endValue,
       intervals: reservedIntervals,
-      players: isMember ? members.length : 1,
+      players,
       isMember,
       members: isMember ? members.map((m) => ({ id: m.id, name: m.name, type: m.type })) : [],
       memberType: isMember ? members[0]?.type : 'Guest',
@@ -171,6 +262,12 @@ const BookingFormScreen = ({ navigation, route }) => {
       subtotal,
       discount: discountPayload,
       amount: total,
+      pricingMode: legacyPricing ? 'hour' : activeMode,
+      pricingRuleId: rule?.id ?? null,
+      pricingLabel: charge.label,
+      unitPrice: charge.unitPrice,
+      units: charge.units,
+      durationMinutes: billedMinutes,
     };
 
     setSaving(true);
@@ -249,7 +346,9 @@ const BookingFormScreen = ({ navigation, route }) => {
                 <Ionicons name="diamond" size={16} color={isMember ? colors.white : colors.primary} />
                 <View>
                   <Text style={[styles.toggleTitle, isMember && { color: colors.white }]}>Member</Text>
-                  <Text style={[styles.toggleSub, isMember && { color: 'rgba(255,255,255,0.85)' }]}>Rs. {table.memberRate}/hr</Text>
+                  <Text style={[styles.toggleSub, isMember && { color: 'rgba(255,255,255,0.85)' }]}>
+                    Rs. {legacyPricing ? table.memberRate : priceOf(rule, true)} {legacyPricing ? '/ hr' : unitSuffix(activeMode)}
+                  </Text>
                 </View>
               </Pressable>
               <Pressable
@@ -259,7 +358,9 @@ const BookingFormScreen = ({ navigation, route }) => {
                 <Ionicons name="person" size={16} color={!isMember ? colors.white : colors.text} />
                 <View>
                   <Text style={[styles.toggleTitle, !isMember && { color: colors.white }]}>Non-Member</Text>
-                  <Text style={[styles.toggleSub, !isMember && { color: 'rgba(255,255,255,0.85)' }]}>Rs. {table.nonMemberRate}/hr</Text>
+                  <Text style={[styles.toggleSub, !isMember && { color: 'rgba(255,255,255,0.85)' }]}>
+                    Rs. {legacyPricing ? table.nonMemberRate : priceOf(rule, false)} {legacyPricing ? '/ hr' : unitSuffix(activeMode)}
+                  </Text>
                 </View>
               </Pressable>
             </View>
@@ -316,20 +417,160 @@ const BookingFormScreen = ({ navigation, route }) => {
             </View>
           )}
 
-          {/* Duration */}
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Duration</Text>
-            <View style={styles.durRow}>
-              {DURATIONS.map((d) => (
-                <Pressable
-                  key={d.label}
-                  onPress={() => setDuration(d)}
-                  style={[styles.durBtn, duration.label === d.label && styles.durBtnActive]}
-                >
-                  <Text style={[styles.durText, duration.label === d.label && { color: colors.white }]}>{d.label}</Text>
-                </Pressable>
-              ))}
+          {/* Pricing mode — the options the admin has priced for this table type */}
+          {!legacyPricing ? (
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>Pricing</Text>
+              <View style={styles.modeRow}>
+                {availableModes.map((m) => {
+                  const active = activeMode === m.value;
+                  const r = pickRule(pricingRules, table.type, m.value, players);
+                  const unit = priceOf(r, isMember);
+                  return (
+                    <Pressable
+                      key={m.value}
+                      onPress={() => setMode(m.value)}
+                      style={[styles.modeBtn, active && styles.modeBtnActive]}
+                    >
+                      <Ionicons name={m.icon} size={16} color={active ? colors.white : colors.primary} />
+                      <Text style={[styles.modeTitle, active && { color: colors.white }]}>{m.short}</Text>
+                      <Text style={[styles.modePrice, active && { color: 'rgba(255,255,255,0.9)' }]}>
+                        {unit ? `Rs. ${unit} ${unitSuffix(m.value)}` : '—'}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Text style={styles.helpText}>
+                {modeMeta(activeMode).hint}
+                {ruleConstraints(rule) ? ` · ${ruleConstraints(rule)}` : ''}
+              </Text>
             </View>
+          ) : null}
+
+          {/* Players — decides which price tier applies */}
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionLabel}>Players</Text>
+              {rule && tierLabel(rule, modeRules) ? (
+                <View style={styles.maxPill}>
+                  <Text style={styles.maxPillText}>{tierLabel(rule, modeRules)}</Text>
+                </View>
+              ) : null}
+            </View>
+            <View style={styles.stepRow}>
+              <Pressable
+                onPress={() => setPlayers((p) => Math.max(1, p - 1))}
+                style={[styles.stepBtn, players <= 1 && styles.stepBtnDisabled]}
+                disabled={players <= 1}
+              >
+                <Ionicons name="remove" size={18} color={players <= 1 ? colors.textMuted : colors.primary} />
+              </Pressable>
+              <View style={styles.stepValueWrap}>
+                <Text style={styles.stepValue}>{players}</Text>
+                <Text style={styles.stepUnit}>{players === 1 ? 'player' : 'players'}</Text>
+              </View>
+              <Pressable
+                onPress={() => setPlayers((p) => Math.min(MAX_PLAYERS, p + 1))}
+                style={[styles.stepBtn, players >= MAX_PLAYERS && styles.stepBtnDisabled]}
+                disabled={players >= MAX_PLAYERS}
+              >
+                <Ionicons name="add" size={18} color={players >= MAX_PLAYERS ? colors.textMuted : colors.primary} />
+              </Pressable>
+            </View>
+            {rule && !playersAllowed(rule, players) ? (
+              <View style={styles.conflictBanner}>
+                <Ionicons name="warning" size={14} color={colors.error} />
+                <Text style={styles.conflictText}>
+                  This rate is {ruleConstraints(rule) || 'limited'}. Change the player count or pick another pricing mode.
+                </Text>
+              </View>
+            ) : null}
+          </View>
+
+          {/* Duration / number of games — depends on the pricing mode */}
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>
+              {activeMode === 'game' && !legacyPricing ? 'Games' : 'Duration'}
+            </Text>
+
+            {activeMode === 'minute' && !legacyPricing ? (
+              <>
+                <View style={styles.durRow}>
+                  {MINUTE_PRESETS.filter((m) => m >= minMinutes(rule)).map((m) => {
+                    const active = Number(minuteInput) === m;
+                    return (
+                      <Pressable
+                        key={m}
+                        onPress={() => setMinuteInput(String(m))}
+                        style={[styles.durBtn, active && styles.durBtnActive]}
+                      >
+                        <Text style={[styles.durText, active && { color: colors.white }]}>{m} min</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Text style={styles.fieldLabel}>Or enter exact minutes</Text>
+                <View style={styles.amountRow}>
+                  <Text style={styles.currency}>min</Text>
+                  <TextInput
+                    value={minuteInput}
+                    onChangeText={setMinuteInput}
+                    placeholder={String(minMinutes(rule))}
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="number-pad"
+                    style={styles.amountInput}
+                  />
+                </View>
+                {charge.error ? <Text style={styles.warnText}>{charge.error}</Text> : null}
+              </>
+            ) : activeMode === 'game' && !legacyPricing ? (
+              <>
+                <View style={styles.stepRow}>
+                  <Pressable
+                    onPress={() => setGames((g) => Math.max(1, g - 1))}
+                    style={[styles.stepBtn, games <= 1 && styles.stepBtnDisabled]}
+                    disabled={games <= 1}
+                  >
+                    <Ionicons name="remove" size={18} color={games <= 1 ? colors.textMuted : colors.primary} />
+                  </Pressable>
+                  <View style={styles.stepValueWrap}>
+                    <Text style={styles.stepValue}>{games}</Text>
+                    <Text style={styles.stepUnit}>{games === 1 ? 'game' : 'games'}</Text>
+                  </View>
+                  <Pressable
+                    onPress={() => setGames((g) => Math.min(12, g + 1))}
+                    style={[styles.stepBtn, games >= 12 && styles.stepBtnDisabled]}
+                    disabled={games >= 12}
+                  >
+                    <Ionicons name="add" size={18} color={games >= 12 ? colors.textMuted : colors.primary} />
+                  </Pressable>
+                </View>
+                <Text style={styles.helpText}>
+                  Each game runs up to {gameMinutes(rule)} minutes · table held for {minutesToLabel(billedMinutes)}.
+                </Text>
+              </>
+            ) : (
+              <View style={styles.durRow}>
+                {DURATIONS.map((d) => (
+                  <Pressable
+                    key={d.label}
+                    onPress={() => setDuration(d)}
+                    style={[styles.durBtn, duration.label === d.label && styles.durBtnActive]}
+                  >
+                    <Text style={[styles.durText, duration.label === d.label && { color: colors.white }]}>{d.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+
+            <View style={styles.chargeBox}>
+              <Text style={styles.chargeText}>
+                Rs. {charge.unitPrice} × {charge.units} {charge.unitLabel}
+              </Text>
+              <Text style={styles.chargeStrong}>Rs. {subtotal.toLocaleString()}</Text>
+            </View>
+
             <View style={styles.endHint}>
               <Ionicons name="arrow-forward-circle" size={14} color={colors.primary} />
               <Text style={styles.endHintText}>
@@ -618,6 +859,40 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.md,
   },
   input: { flex: 1, ...typography.body, color: colors.text, paddingVertical: 0 },
+
+  modeRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm },
+  modeBtn: {
+    flex: 1, alignItems: 'center', gap: 2,
+    paddingVertical: spacing.md, paddingHorizontal: spacing.xs,
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 1.5, borderColor: colors.border,
+    borderRadius: borderRadius.md,
+  },
+  modeBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  modeTitle: { ...typography.bodySmall, color: colors.text, fontWeight: '800' },
+  modePrice: { fontSize: 10, color: colors.textLight, fontWeight: '700', textAlign: 'center' },
+
+  stepRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  stepBtn: {
+    width: 44, height: 44, borderRadius: borderRadius.md,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.primarySoft,
+    borderWidth: 1.5, borderColor: colors.border,
+  },
+  stepBtnDisabled: { backgroundColor: colors.surfaceAlt, opacity: 0.6 },
+  stepValueWrap: { flex: 1, alignItems: 'center' },
+  stepValue: { ...typography.h2, color: colors.text, fontWeight: '800' },
+  stepUnit: { ...typography.caption, color: colors.textLight, textTransform: 'none', letterSpacing: 0 },
+
+  chargeBox: {
+    marginTop: spacing.md,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2,
+    backgroundColor: colors.surfaceAlt, borderRadius: borderRadius.md,
+  },
+  chargeText: { ...typography.bodySmall, color: colors.textLight, fontWeight: '700' },
+  chargeStrong: { ...typography.body, color: colors.text, fontWeight: '800' },
+  warnText: { ...typography.caption, color: colors.warning, fontWeight: '700', marginTop: spacing.xs, textTransform: 'none', letterSpacing: 0 },
 
   durRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   durBtn: {

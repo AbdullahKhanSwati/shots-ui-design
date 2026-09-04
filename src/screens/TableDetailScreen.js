@@ -22,6 +22,9 @@ import {
   buildIntervals, nextSevenDays, dateKey, bookedIntervalsFor, findBookingByInterval,
   tableFreeIn,
 } from '../data/mockData';
+import {
+  modesForType, rulesFor, ruleConstraints, tierLabel, unitSuffix,
+} from '../data/pricing';
 import { useShots } from '../store/ShotsStore';
 import { uploadToBucket } from '../lib/supabase';
 import ScreenHeader from '../components/ScreenHeader';
@@ -34,7 +37,7 @@ const STATUSES = [
 
 const TableDetailScreen = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
-  const { tables, bookings, updateTable, updateBooking } = useShots();
+  const { tables, bookings, pricingRules, updateTable, updateBooking } = useShots();
   const id = route.params?.tableId;
   const table = tables.find((t) => t.id === id);
 
@@ -44,6 +47,11 @@ const TableDetailScreen = ({ navigation, route }) => {
   const [uploadingImage, setUploadingImage] = useState(false);
 
   useFocusEffect(useCallback(() => { setTick((t) => t + 1); }, []));
+
+  const priceModes = useMemo(
+    () => modesForType(pricingRules, table?.type),
+    [pricingRules, table?.type]
+  );
 
   const dates = useMemo(() => nextSevenDays(), []);
   const intervals = useMemo(
@@ -290,12 +298,47 @@ const TableDetailScreen = ({ navigation, route }) => {
           ) : null}
         </TouchableOpacity>
 
-        {/* Pricing */}
-        <View style={styles.priceCard}>
-          <PriceTile icon="diamond" label="Member Rate" value={`Rs. ${table.memberRate}/hr`} color={colors.primary} />
-          <View style={styles.priceDivider} />
-          <PriceTile icon="person" label="Non-Member" value={`Rs. ${table.nonMemberRate}/hr`} color={colors.text} />
-        </View>
+        {/* Pricing — every mode the admin has priced for this table type */}
+        {priceModes.length > 0 ? (
+          <View style={styles.rateCard}>
+            <View style={styles.rateHead}>
+              <Ionicons name="pricetags" size={14} color={colors.primary} />
+              <Text style={styles.rateHeadText}>{table.type} rates</Text>
+            </View>
+            {priceModes.map((m, i) => {
+              const list = rulesFor(pricingRules, table.type, m.value);
+              const note = ruleConstraints(list[0]) || m.hint;
+              return (
+                <View key={m.value} style={[styles.rateRow, i > 0 && styles.rateRowDivided]}>
+                  <View style={styles.rateIcon}>
+                    <Ionicons name={m.icon} size={15} color={colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.rateLabel}>{m.label}</Text>
+                    {note ? <Text style={styles.rateNote}>{note}</Text> : null}
+                  </View>
+                  <View style={styles.rateValues}>
+                    {list.map((r) => {
+                      const tier = tierLabel(r, list);
+                      return (
+                        <Text key={r.id} style={styles.rateValue}>
+                          Rs. {r.memberPrice} <Text style={styles.rateUnit}>{unitSuffix(m.value)}</Text>
+                          {tier ? <Text style={styles.rateTier}>{`  ${tier}`}</Text> : null}
+                        </Text>
+                      );
+                    })}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        ) : (
+          <View style={styles.priceCard}>
+            <PriceTile icon="diamond" label="Member Rate" value={`Rs. ${table.memberRate}/hr`} color={colors.primary} />
+            <View style={styles.priceDivider} />
+            <PriceTile icon="person" label="Non-Member" value={`Rs. ${table.nonMemberRate}/hr`} color={colors.text} />
+          </View>
+        )}
 
         {/* Table status control */}
         <Text style={styles.sectionTitle}>Table status</Text>
@@ -578,6 +621,30 @@ const styles = StyleSheet.create({
   priceLabel: { fontSize: 10, color: colors.textLight, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase' },
   priceValue: { ...typography.h4, marginTop: 2 },
   priceDivider: { width: 1, marginHorizontal: spacing.md, backgroundColor: colors.border },
+
+  rateCard: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.xl,
+    padding: spacing.md,
+    borderWidth: 1, borderColor: colors.border,
+    ...shadows.sm,
+    marginBottom: spacing.lg,
+  },
+  rateHead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: spacing.sm },
+  rateHeadText: { fontSize: 10, color: colors.textLight, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase' },
+  rateRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm },
+  rateRowDivided: { borderTopWidth: 1, borderTopColor: colors.border },
+  rateIcon: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  rateLabel: { ...typography.bodySmall, color: colors.text, fontWeight: '800' },
+  rateNote: { fontSize: 10, color: colors.textLight, fontWeight: '600', marginTop: 1 },
+  rateValues: { alignItems: 'flex-end' },
+  rateValue: { ...typography.bodySmall, color: colors.primary, fontWeight: '800' },
+  rateUnit: { color: colors.textLight, fontWeight: '700', fontSize: 10 },
+  rateTier: { color: colors.textMuted, fontWeight: '600', fontSize: 10 },
 
   sectionTitle: { ...typography.h4, color: colors.text, marginBottom: spacing.sm },
   statusRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },

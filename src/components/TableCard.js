@@ -3,6 +3,7 @@ import { Animated, StyleSheet, Text, View, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography, spacing, borderRadius, shadows } from '../styles/theme';
 import { tableFreeIn } from '../data/mockData';
+import { priceSummary } from '../data/pricing';
 
 const statusMeta = {
   Available:   { color: colors.success, bg: colors.successSoft, icon: 'checkmark-circle' },
@@ -10,7 +11,7 @@ const statusMeta = {
   Maintenance: { color: colors.warning, bg: colors.warningSoft, icon: 'construct' },
 };
 
-const TableCard = ({ table, onPress, delay = 0 }) => {
+const TableCard = ({ table, onPress, delay = 0, pricingRules = [] }) => {
   const scale = useRef(new Animated.Value(1)).current;
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(16)).current;
@@ -24,6 +25,9 @@ const TableCard = ({ table, onPress, delay = 0 }) => {
 
   const meta = statusMeta[table.status] || statusMeta.Available;
   const freeIn = tableFreeIn(table);
+  // Prices come from the type's pricing rules; fall back to the table's own
+  // hourly rates for any type the admin hasn't priced yet.
+  const summary = priceSummary(pricingRules, table.type, true);
 
   return (
     <Animated.View style={{ opacity, transform: [{ translateY }, { scale }] }}>
@@ -51,10 +55,14 @@ const TableCard = ({ table, onPress, delay = 0 }) => {
             </View>
             <View style={styles.metaRow}>
               <Ionicons name="pricetag-outline" size={12} color={colors.textLight} />
-              <Text style={styles.metaText}>
-                Rs. {table.memberRate} / {table.nonMemberRate}{' '}
-                <Text style={styles.metaSub}>member / non-member</Text>
-              </Text>
+              {summary ? (
+                <Text style={styles.metaText} numberOfLines={2}>{summary}</Text>
+              ) : (
+                <Text style={styles.metaText}>
+                  Rs. {table.memberRate} / {table.nonMemberRate}{' '}
+                  <Text style={styles.metaSub}>member / non-member</Text>
+                </Text>
+              )}
             </View>
           </View>
         </View>

@@ -48,6 +48,16 @@ const BOOKING_KEYS = {
   end: 'end_time', intervals: 'intervals', status: 'status', amount: 'amount',
   subtotal: 'subtotal', players: 'players', isMember: 'is_member', memberId: 'member_id',
   memberName: 'member_name', memberType: 'member_type', members: 'members', discount: 'discount',
+  pricingMode: 'pricing_mode', pricingRuleId: 'pricing_rule_id', pricingLabel: 'pricing_label',
+  unitPrice: 'unit_price', units: 'units', durationMinutes: 'duration_minutes',
+};
+const TABLE_TYPE_KEYS = { name: 'name', sortOrder: 'sort_order' };
+const PRICING_RULE_KEYS = {
+  tableType: 'table_type', mode: 'mode', players: 'players',
+  memberPrice: 'member_price', nonMemberPrice: 'non_member_price',
+  minMinutes: 'min_minutes', maxMinutes: 'max_minutes',
+  minPlayers: 'min_players', maxPlayers: 'max_players',
+  active: 'active', sortOrder: 'sort_order',
 };
 const FINANCE_KEYS = {
   date: 'date', time: 'time', type: 'type', category: 'category',
@@ -73,6 +83,8 @@ const rowToTable = (r) => fromRow(r, TABLE_KEYS);
 const rowToMember = (r) => fromRow(r, MEMBER_KEYS);
 const rowToBooking = (r) => fromRow(r, BOOKING_KEYS);
 const rowToFinance = (r) => fromRow(r, FINANCE_KEYS);
+const rowToTableType = (r) => fromRow(r, TABLE_TYPE_KEYS);
+const rowToPricingRule = (r) => fromRow(r, PRICING_RULE_KEYS);
 
 // Entity registry — links the outbox `entity` to its table + row->UI mapper.
 const CFG = {
@@ -105,6 +117,8 @@ export function ShotsProvider({ children }) {
   const [members, setMembers] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [finance, setFinance] = useState([]);
+  const [tableTypes, setTableTypes] = useState([]);
+  const [pricingRules, setPricingRules] = useState([]);
   const [ready, setReady] = useState(false);
   const [offline, setOffline] = useState(false);
   const [businessName, setBusinessName] = useState('');
@@ -135,11 +149,13 @@ export function ShotsProvider({ children }) {
     const bid = businessIdRef.current;
     if (!bid) return false;
     try {
-      const [t, m, b, f, bs] = await Promise.all([
+      const [t, m, b, f, tt, pr, bs] = await Promise.all([
         supabase.from('pool_tables').select('*').order('number', { ascending: true }),
         supabase.from('members').select('*').order('created_at', { ascending: true }),
         supabase.from('bookings').select('*').order('date', { ascending: true }),
         supabase.from('transactions').select('*').order('date', { ascending: true }),
+        supabase.from('table_types').select('*').order('sort_order', { ascending: true }),
+        supabase.from('pricing_rules').select('*').order('sort_order', { ascending: true }),
         supabase.from('business_settings').select('profile').eq('business_id', bid).maybeSingle(),
       ]);
       if (t.error || m.error || b.error || f.error) { setOffline(true); return false; }
@@ -147,6 +163,8 @@ export function ShotsProvider({ children }) {
       setMembers((m.data || []).map(rowToMember));
       setBookings((b.data || []).map(rowToBooking));
       setFinance((f.data || []).map(rowToFinance));
+      setTableTypes((tt.data || []).map(rowToTableType));
+      setPricingRules((pr.data || []).map(rowToPricingRule));
       setBusinessName(bs?.data?.profile?.name || '');
       setOffline(false);
       setReady(true);
@@ -224,6 +242,7 @@ export function ShotsProvider({ children }) {
   useEffect(() => {
     if (!businessId) {
       setTables([]); setMembers([]); setBookings([]); setFinance([]);
+      setTableTypes([]); setPricingRules([]);
       setReady(false); outboxRef.current = []; setPending(0);
       return;
     }
@@ -235,6 +254,8 @@ export function ShotsProvider({ children }) {
         setMembers(cached.members || []);
         setBookings(cached.bookings || []);
         setFinance(cached.finance || []);
+        setTableTypes(cached.tableTypes || []);
+        setPricingRules(cached.pricingRules || []);
         setBusinessName(cached.businessName || '');
         setReady(true);
       }
@@ -260,8 +281,10 @@ export function ShotsProvider({ children }) {
   // Persist a snapshot for offline viewing after each state change.
   useEffect(() => {
     if (!businessId || !ready) return;
-    setCache(`data:${businessId}`, { tables, members, bookings, finance, businessName });
-  }, [businessId, ready, tables, members, bookings, finance, businessName]);
+    setCache(`data:${businessId}`, {
+      tables, members, bookings, finance, tableTypes, pricingRules, businessName,
+    });
+  }, [businessId, ready, tables, members, bookings, finance, tableTypes, pricingRules, businessName]);
 
   // Live sync: reflect changes made elsewhere (admin dashboard, other staff).
   // Skipped while we have unsynced local changes so it can't clobber them.
@@ -287,6 +310,16 @@ export function ShotsProvider({ children }) {
         if (outboxRef.current.length) return;
         const { data } = await supabase.from('transactions').select('*').order('date', { ascending: true });
         setFinance((data || []).map(rowToFinance));
+      },
+      // Config the admin dashboard owns — never queued locally, so always safe
+      // to refresh even while the outbox has pending writes.
+      table_types: async () => {
+        const { data } = await supabase.from('table_types').select('*').order('sort_order', { ascending: true });
+        setTableTypes((data || []).map(rowToTableType));
+      },
+      pricing_rules: async () => {
+        const { data } = await supabase.from('pricing_rules').select('*').order('sort_order', { ascending: true });
+        setPricingRules((data || []).map(rowToPricingRule));
       },
     };
     const channel = supabase.channel(`shots-rt-${businessId}`);
@@ -413,14 +446,16 @@ export function ShotsProvider({ children }) {
   }, [localInsert]);
 
   const value = useMemo(() => ({
-    tables, members, bookings, finance, ready, offline, businessName, pending, syncing,
+    tables, members, bookings, finance, tableTypes, pricingRules,
+    ready, offline, businessName, pending, syncing,
     reload, sync,
     updateTable,
     addMember, updateMember, deleteMember,
     addBooking, updateBooking, deleteBooking,
     addFinanceEntry,
   }), [
-    tables, members, bookings, finance, ready, offline, businessName, pending, syncing,
+    tables, members, bookings, finance, tableTypes, pricingRules,
+    ready, offline, businessName, pending, syncing,
     reload, sync,
     updateTable,
     addMember, updateMember, deleteMember,
