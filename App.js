@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { Text, View } from 'react-native';
-import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Alert, Text, View } from 'react-native';
+import { NavigationContainer, DefaultTheme, createNavigationContainerRef } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -9,11 +9,13 @@ import { KeyboardProvider } from 'react-native-keyboard-controller';
 import * as SplashScreen from 'expo-splash-screen';
 
 import RootNavigator from './src/navigation/RootNavigator';
-import { AuthProvider } from './src/context/AuthContext';
+import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { ShotsProvider, useShots } from './src/store/ShotsStore';
 import { colors } from './src/styles/theme';
 
 SplashScreen.preventAutoHideAsync();
+
+const navigationRef = createNavigationContainerRef();
 
 const navTheme = {
   ...DefaultTheme,
@@ -52,9 +54,10 @@ export default function App() {
           <StatusBar style="dark" />
         <AuthProvider>
           <ShotsProvider>
-            <NavigationContainer theme={navTheme}>
+            <NavigationContainer ref={navigationRef} theme={navTheme}>
               <RootNavigator />
             </NavigationContainer>
+            <SessionWatcher />
             <OfflineBanner />
           </ShotsProvider>
         </AuthProvider>
@@ -62,6 +65,33 @@ export default function App() {
       </KeyboardProvider>
     </GestureHandlerRootView>
   );
+}
+
+// When a signed-in session disappears (sign-out elsewhere, or the admin deleted
+// this login) send the user back to Login. A deleted login also gets a notice.
+const PUBLIC_ROUTES = ['Splash', 'Login', 'BusinessSelection'];
+function SessionWatcher() {
+  const { session, loading, revoked, clearRevoked } = useAuth();
+  const hadSession = useRef(false);
+
+  useEffect(() => {
+    if (loading) return;
+    if (session) { hadSession.current = true; return; }
+    if (!hadSession.current && !revoked) return;
+    hadSession.current = false;
+    if (navigationRef.isReady()) {
+      const current = navigationRef.getCurrentRoute()?.name;
+      if (!PUBLIC_ROUTES.includes(current)) {
+        navigationRef.reset({ index: 0, routes: [{ name: 'Login' }] });
+      }
+    }
+    if (revoked) {
+      Alert.alert('Signed out', 'Your login was removed by the admin. Please contact your manager if you need access again.');
+      clearRevoked();
+    }
+  }, [session, loading, revoked, clearRevoked]);
+
+  return null;
 }
 
 // Small toast-style pill reflecting offline / queued / syncing state.

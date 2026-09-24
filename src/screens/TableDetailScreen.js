@@ -321,10 +321,17 @@ const TableDetailScreen = ({ navigation, route }) => {
                     {list.map((r) => {
                       const tier = tierLabel(r, list);
                       return (
-                        <Text key={r.id} style={styles.rateValue}>
-                          Rs. {r.memberPrice} <Text style={styles.rateUnit}>{unitSuffix(m.value)}</Text>
-                          {tier ? <Text style={styles.rateTier}>{`  ${tier}`}</Text> : null}
-                        </Text>
+                        <View key={r.id} style={styles.rateTierBlock}>
+                          {tier ? <Text style={styles.rateTier}>{tier}</Text> : null}
+                          <Text style={styles.rateValue}>
+                            <Text style={styles.rateWho}>Member </Text>
+                            Rs. {r.memberPrice} <Text style={styles.rateUnit}>{unitSuffix(m.value)}</Text>
+                          </Text>
+                          <Text style={[styles.rateValue, styles.rateValueGuest]}>
+                            <Text style={styles.rateWho}>Non-member </Text>
+                            Rs. {r.nonMemberPrice} <Text style={styles.rateUnit}>{unitSuffix(m.value)}</Text>
+                          </Text>
+                        </View>
                       );
                     })}
                   </View>
@@ -644,7 +651,10 @@ const styles = StyleSheet.create({
   rateValues: { alignItems: 'flex-end' },
   rateValue: { ...typography.bodySmall, color: colors.primary, fontWeight: '800' },
   rateUnit: { color: colors.textLight, fontWeight: '700', fontSize: 10 },
-  rateTier: { color: colors.textMuted, fontWeight: '600', fontSize: 10 },
+  rateTier: { color: colors.textMuted, fontWeight: '700', fontSize: 10, textAlign: 'right' },
+  rateTierBlock: { alignItems: 'flex-end', marginVertical: 2 },
+  rateWho: { color: colors.textLight, fontWeight: '700', fontSize: 10 },
+  rateValueGuest: { color: colors.text },
 
   sectionTitle: { ...typography.h4, color: colors.text, marginBottom: spacing.sm },
   statusRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },

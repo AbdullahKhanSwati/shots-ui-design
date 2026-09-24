@@ -48,10 +48,11 @@ const DashboardScreen = ({ navigation }) => {
 
   // Today's calculations (hero)
   const todayKey = dateKey(todayDate);
-  const todayBookings = bookings.filter((b) => b.date === todayKey).length;
-  const todayRevenue = bookings
-    .filter((b) => b.date === todayKey)
-    .reduce((s, b) => s + (b.amount || 0), 0);
+  // Cancelled bookings stay in the records but never count as bookings or
+  // revenue — same rule as the Booking Revenue card below.
+  const todayActive = bookings.filter((b) => b.date === todayKey && b.status !== 'Cancelled');
+  const todayBookings = todayActive.length;
+  const todayRevenue = todayActive.reduce((s, b) => s + (b.amount || 0), 0);
 
   // Overview — computed for the selected timeframe.
   const overview = useMemo(() => {
