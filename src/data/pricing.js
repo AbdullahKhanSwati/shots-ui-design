@@ -199,3 +199,59 @@ export function priceSummary(pricingRules = [], tableType, isMember = true) {
 export function slotsForMinutes(minutes, stepMin = 15) {
   return Math.max(1, Math.ceil(Math.max(1, num(minutes)) / stepMin));
 }
+
+// ---------------------------------------------------------------------------
+// Booking display helpers (same rules as the admin's data/bookingInfo.js)
+// ---------------------------------------------------------------------------
+
+const hhmmToMin = (t) => {
+  const [h, m] = String(t || '').split(':').map(Number);
+  return Number.isFinite(h) ? h * 60 + (Number.isFinite(m) ? m : 0) : null;
+};
+
+/**
+ * Real state of a booking from its date + time — the database keeps
+ * 'Active' until a booking is cancelled.
+ * @returns 'Cancelled' | 'Upcoming' | 'Active' | 'Completed'
+ */
+export function bookingStatus(b, now = new Date()) {
+  if (!b) return 'Active';
+  if (b.status === 'Cancelled' || b.status === 'Completed') return b.status;
+  const s = hhmmToMin(b.start);
+  let e = hhmmToMin(b.end);
+  const [y, mo, d] = String(b.date || '').split('-').map(Number);
+  if (s == null || e == null || !y) return b.status || 'Active';
+  if (e <= s) e += 24 * 60; // runs past midnight
+  const start = new Date(y, mo - 1, d, 0, s);
+  const end = new Date(y, mo - 1, d, 0, e);
+  if (now < start) return 'Upcoming';
+  if (now >= end) return 'Completed';
+  return 'Active';
+}
+
+/** Booked length in minutes (stored value, else from the time range). */
+export function bookingMinutes(b) {
+  if (num(b?.durationMinutes) > 0) return num(b.durationMinutes);
+  const s = hhmmToMin(b?.start);
+  let e = hhmmToMin(b?.end);
+  if (s == null || e == null) return 0;
+  if (e <= s) e += 24 * 60;
+  return e - s;
+}
+
+/**
+ * What the customer paid for, in one line:
+ *   "Per game · 2 games × Rs. 350"
+ *   "Per hour · 1 hr 30 min @ Rs. 800/hr"
+ *   "Per minute · 45 min @ Rs. 12/min"
+ */
+export function bookingPricingText(b) {
+  const mode = PRICING_MODES.find((m) => m.value === (b?.pricingMode || 'hour')) || PRICING_MODES[0];
+  const price = num(b?.unitPrice);
+  if (b?.pricingMode === 'game') {
+    const games = Math.max(1, Math.round(num(b.units) || 1));
+    return `${mode.label} · ${games} game${games === 1 ? '' : 's'}${price ? ` × Rs. ${price.toLocaleString()}` : ''}`;
+  }
+  const suffix = b?.pricingMode === 'minute' ? 'min' : 'hr';
+  return `${mode.label} · ${minutesToLabel(bookingMinutes(b))}${price ? ` @ Rs. ${price.toLocaleString()}/${suffix}` : ''}`;
+}

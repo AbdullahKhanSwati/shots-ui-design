@@ -17,7 +17,7 @@ import { useShots } from '../store/ShotsStore';
 import TableCard from '../components/TableCard';
 import SearchBar from '../components/SearchBar';
 import FilterChips from '../components/FilterChips';
-import { PRICING_MODES } from '../data/pricing';
+import { bookingStatus, bookingPricingText } from '../data/pricing';
 
 const STATUS_OPTIONS = [
   { value: 'All', label: 'All', icon: 'apps' },
@@ -37,6 +37,10 @@ const TablesScreen = ({ navigation }) => {
   useFocusEffect(
     React.useCallback(() => {
       setTick((t) => t + 1);
+      // Re-render every minute while visible so Upcoming → Playing → Completed
+      // updates on its own.
+      const timer = setInterval(() => setTick((t) => t + 1), 60 * 1000);
+      return () => clearInterval(timer);
     }, [])
   );
 
@@ -216,7 +220,11 @@ const TablesScreen = ({ navigation }) => {
                 </View>
 
                 {list.map((b) => {
-                  const cancelled = b.status === 'Cancelled';
+                  // Real state from date + time (the DB keeps 'Active' until cancelled).
+                  const st = bookingStatus(b);
+                  const cancelled = st === 'Cancelled';
+                  const playing = st === 'Active';
+                  const stColor = cancelled ? colors.error : playing ? colors.success : st === 'Upcoming' ? colors.info : colors.textLight;
                   return (
                     <TouchableOpacity
                       key={b.id}
@@ -226,11 +234,12 @@ const TablesScreen = ({ navigation }) => {
                     >
                       <View style={[
                         styles.bookingTime,
-                        b.status === 'Active' && { backgroundColor: colors.successSoft },
+                        playing && { backgroundColor: colors.successSoft },
+                        st === 'Upcoming' && { backgroundColor: colors.infoSoft },
                         cancelled && { backgroundColor: colors.surfaceAlt },
                       ]}>
-                        <Text style={[styles.bookingTimeText, b.status === 'Active' && { color: colors.success }, cancelled && { color: colors.textMuted }]}>{b.start}</Text>
-                        <Text style={[styles.bookingTimeText, b.status === 'Active' && { color: colors.success }, cancelled && { color: colors.textMuted }, { fontSize: 10 }]}>{b.end}</Text>
+                        <Text style={[styles.bookingTimeText, { color: cancelled ? colors.textMuted : st === 'Completed' ? colors.text : stColor }]}>{b.start}</Text>
+                        <Text style={[styles.bookingTimeText, { color: cancelled ? colors.textMuted : st === 'Completed' ? colors.text : stColor }, { fontSize: 10 }]}>{b.end}</Text>
                       </View>
                       <View style={{ flex: 1, marginLeft: spacing.md }}>
                         <View style={styles.bookingTitleRow}>
@@ -239,11 +248,11 @@ const TablesScreen = ({ navigation }) => {
                           </Text>
                           <View style={[
                             styles.statusPill,
-                            b.status === 'Active' ? styles.pillActive : styles.pillDone,
+                            playing ? styles.pillActive : st === 'Upcoming' ? styles.pillUpcoming : styles.pillDone,
                             cancelled && styles.pillCancelled,
                           ]}>
-                            <Text style={[styles.statusPillText, { color: cancelled ? colors.error : b.status === 'Active' ? colors.success : colors.textLight }]}>
-                              {b.status}
+                            <Text style={[styles.statusPillText, { color: stColor }]}>
+                              {playing ? 'Playing' : st}
                             </Text>
                           </View>
                         </View>
@@ -255,15 +264,13 @@ const TablesScreen = ({ navigation }) => {
                           <Text style={styles.bookingDot}>•</Text>
                           <Ionicons name={b.isMember ? 'diamond' : 'person'} size={11} color={colors.textLight} />
                           <Text style={styles.bookingMetaText}>{b.isMember ? 'Member' : 'Guest'}</Text>
-                          {b.pricingMode ? (
-                            <>
-                              <Text style={styles.bookingDot}>•</Text>
-                              <Ionicons name="pricetag" size={11} color={colors.textLight} />
-                              <Text style={styles.bookingMetaText}>
-                                {(PRICING_MODES.find((m) => m.value === b.pricingMode) || {}).label || b.pricingMode}
-                              </Text>
-                            </>
-                          ) : null}
+                        </View>
+                        {/* What was paid for — e.g. "Per Game · 2 games × Rs. 350" */}
+                        <View style={styles.bookingMeta}>
+                          <Ionicons name="pricetag" size={11} color={colors.textLight} />
+                          <Text style={[styles.bookingMetaText, styles.bookingPricing]} numberOfLines={1}>
+                            {bookingPricingText(b)}
+                          </Text>
                         </View>
                         <View style={styles.bookingFootRow}>
                           <Text style={[styles.bookingAmt, cancelled && styles.cancelledText]}>Rs. {(b.amount || 0).toLocaleString()}</Text>
@@ -297,9 +304,9 @@ const SummaryItem = ({ icon, label, value, color }) => (
     <View style={[styles.summaryIcon, { backgroundColor: `${color}1A` }]}>
       <Ionicons name={icon} size={16} color={color} />
     </View>
-    <View>
-      <Text style={styles.summaryValue}>{value}</Text>
-      <Text style={styles.summaryLabel}>{label}</Text>
+    <View style={styles.summaryTextWrap}>
+      <Text style={styles.summaryValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{value}</Text>
+      <Text style={styles.summaryLabel} numberOfLines={1}>{label}</Text>
     </View>
   </View>
 );
@@ -344,6 +351,7 @@ const styles = StyleSheet.create({
 
   bookingSummary: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
   summaryItem: {
+    minWidth: 0,
     flex: 1,
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     backgroundColor: colors.surface,
@@ -356,6 +364,8 @@ const styles = StyleSheet.create({
     width: 32, height: 32, borderRadius: 16,
     alignItems: 'center', justifyContent: 'center',
   },
+  // flex + minWidth 0 lets a long amount shrink inside its box instead of spilling out.
+  summaryTextWrap: { flex: 1, minWidth: 0 },
   summaryValue: { ...typography.body, color: colors.text, fontWeight: '800' },
   summaryLabel: { fontSize: 10, color: colors.textLight, fontWeight: '700' },
 
@@ -416,10 +426,12 @@ const styles = StyleSheet.create({
   statusPill: { paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: borderRadius.round },
   pillActive: { backgroundColor: colors.successSoft },
   pillDone: { backgroundColor: colors.surfaceAlt },
+  pillUpcoming: { backgroundColor: colors.infoSoft },
   statusPillText: { fontSize: 10, fontWeight: '700' },
   bookingMeta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
   bookingMetaText: { ...typography.caption, color: colors.textLight, textTransform: 'none', letterSpacing: 0 },
   bookingDot: { color: colors.textMuted, marginHorizontal: 4 },
+  bookingPricing: { flex: 1, color: colors.text, fontWeight: '700' },
   bookingAmt: { ...typography.bodySmall, color: colors.primary, fontWeight: '800', marginTop: 4 },
 });
 

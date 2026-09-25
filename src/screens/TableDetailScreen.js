@@ -4,6 +4,7 @@ import {
   Alert,
   Image,
   Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -23,7 +24,7 @@ import {
   tableFreeIn,
 } from '../data/mockData';
 import {
-  modesForType, rulesFor, ruleConstraints, tierLabel, unitSuffix,
+  modesForType, rulesFor, ruleConstraints, tierLabel, unitSuffix, bookingStatus, bookingPricingText,
 } from '../data/pricing';
 import { useShots } from '../store/ShotsStore';
 import { uploadToBucket } from '../lib/supabase';
@@ -100,17 +101,18 @@ const TableDetailScreen = ({ navigation, route }) => {
     }
   };
 
+  // Own bottom sheet instead of Alert: Android alerts show at most 3 buttons,
+  // so with "Remove Photo" the Cancel button disappeared and the dialog could
+  // not be closed. The sheet always has Cancel and closes on back / outside tap.
+  const [photoSheet, setPhotoSheet] = useState(false);
   const handlePickImage = () => {
     if (uploadingImage) return;
-    const options = [
-      { text: 'Take Photo', onPress: () => launchPicker('camera') },
-      { text: 'Choose from Gallery', onPress: () => launchPicker('library') },
-    ];
-    if (table.image) {
-      options.push({ text: 'Remove Photo', style: 'destructive', onPress: () => updateTable(table.id, { image: null }) });
-    }
-    options.push({ text: 'Cancel', style: 'cancel' });
-    Alert.alert('Table Photo', 'Add a photo for this table', options);
+    setPhotoSheet(true);
+  };
+  const pickFromSheet = (action) => {
+    setPhotoSheet(false);
+    if (action === 'remove') updateTable(table.id, { image: null });
+    else launchPicker(action);
   };
 
   const handleEndSession = () => {
@@ -452,6 +454,25 @@ const TableDetailScreen = ({ navigation, route }) => {
         </View>
       </ScrollView>
 
+      {/* Table photo actions */}
+      <Modal visible={photoSheet} transparent animationType="slide" onRequestClose={() => setPhotoSheet(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setPhotoSheet(false)}>
+          <Pressable style={[styles.modalCard, { paddingBottom: insets.bottom + spacing.md }]} onPress={() => {}}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Table photo</Text>
+            <Text style={styles.photoSheetSub}>Table #{table.number}</Text>
+            <SheetOption icon="camera-outline" label="Take photo" onPress={() => pickFromSheet('camera')} />
+            <SheetOption icon="images-outline" label="Choose from gallery" onPress={() => pickFromSheet('library')} />
+            {table.image ? (
+              <SheetOption icon="trash-outline" label="Remove photo" danger onPress={() => pickFromSheet('remove')} />
+            ) : null}
+            <TouchableOpacity style={styles.photoSheetCancel} onPress={() => setPhotoSheet(false)} activeOpacity={0.85}>
+              <Text style={styles.photoSheetCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* Booked-slot details */}
       <Modal
         visible={!!bookingModal}
@@ -479,7 +500,8 @@ const TableDetailScreen = ({ navigation, route }) => {
                   <DetailRow icon="people" label="Players" value={`${bookingModal.booking.members?.length || 1}`} />
                   <DetailRow icon="person" label="Member(s)" value={bookingModal.booking.memberName} />
                   <DetailRow icon={bookingModal.booking.isMember ? 'diamond' : 'walk'} label="Type" value={bookingModal.booking.isMember ? 'Member' : 'Guest'} />
-                  <DetailRow icon="cash" label="Total" value={`Rs. ${bookingModal.booking.amount.toLocaleString()}`} />
+                  <DetailRow icon="pricetags" label="Pricing" value={bookingPricingText(bookingModal.booking)} />
+                  <DetailRow icon="cash" label="Total" value={`Rs. ${(bookingModal.booking.amount || 0).toLocaleString()}`} />
                   {bookingModal.booking.discount ? (
                     <DetailRow
                       icon="pricetag"
@@ -490,8 +512,12 @@ const TableDetailScreen = ({ navigation, route }) => {
                   <DetailRow
                     icon="checkmark-circle"
                     label="Status"
-                    value={bookingModal.booking.status}
-                    valueColor={bookingModal.booking.status === 'Active' ? colors.success : colors.textLight}
+                    value={bookingStatus(bookingModal.booking)}
+                    valueColor={
+                      bookingStatus(bookingModal.booking) === 'Active' ? colors.success
+                        : bookingStatus(bookingModal.booking) === 'Cancelled' ? colors.error
+                          : bookingStatus(bookingModal.booking) === 'Upcoming' ? colors.info : colors.textLight
+                    }
                   />
                 </View>
 
@@ -538,6 +564,15 @@ const PriceTile = ({ icon, label, value, color }) => (
       <Text style={[styles.priceValue, { color }]}>{value}</Text>
     </View>
   </View>
+);
+
+const SheetOption = ({ icon, label, danger, onPress }) => (
+  <TouchableOpacity style={styles.sheetOption} onPress={onPress} activeOpacity={0.8}>
+    <View style={[styles.sheetOptionIcon, danger && { backgroundColor: colors.errorSoft }]}>
+      <Ionicons name={icon} size={18} color={danger ? colors.error : colors.primary} />
+    </View>
+    <Text style={[styles.sheetOptionText, danger && { color: colors.error }]}>{label}</Text>
+  </TouchableOpacity>
 );
 
 const DetailRow = ({ icon, label, value, valueColor }) => (
@@ -732,6 +767,23 @@ const styles = StyleSheet.create({
   },
   modalHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: spacing.md },
   modalTitle: { ...typography.h3, color: colors.text },
+  photoSheetSub: { ...typography.bodySmall, color: colors.textLight, marginTop: 2, marginBottom: spacing.md },
+  sheetOption: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    paddingVertical: spacing.md, paddingHorizontal: spacing.sm,
+    borderRadius: borderRadius.md,
+  },
+  sheetOptionIcon: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center',
+  },
+  sheetOptionText: { ...typography.body, color: colors.text, fontWeight: '700' },
+  photoSheetCancel: {
+    marginTop: spacing.sm, paddingVertical: spacing.md,
+    borderRadius: borderRadius.lg, backgroundColor: colors.surfaceAlt,
+    borderWidth: 1, borderColor: colors.border, alignItems: 'center',
+  },
+  photoSheetCancelText: { ...typography.body, color: colors.text, fontWeight: '800' },
   modalSub: { ...typography.bodySmall, color: colors.textLight, marginTop: 2 },
   detailCard: {
     backgroundColor: colors.surfaceAlt,
