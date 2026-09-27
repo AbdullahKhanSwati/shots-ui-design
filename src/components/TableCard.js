@@ -3,7 +3,7 @@ import { Animated, StyleSheet, Text, View, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography, spacing, borderRadius, shadows } from '../styles/theme';
 import { tableFreeIn } from '../data/mockData';
-import { priceSummary } from '../data/pricing';
+import { priceSummary, bookingPricingText } from '../data/pricing';
 
 const statusMeta = {
   Available:   { color: colors.success, bg: colors.successSoft, icon: 'checkmark-circle' },
@@ -11,7 +11,10 @@ const statusMeta = {
   Maintenance: { color: colors.warning, bg: colors.warningSoft, icon: 'construct' },
 };
 
-const TableCard = ({ table, onPress, delay = 0, pricingRules = [] }) => {
+// current / next: the booking playing now and the next one today (from
+// currentBookingFor / nextBookingFor) — shown so staff can see at a glance who
+// is on the table and what they paid for (e.g. "Per Game · 2 games").
+const TableCard = ({ table, onPress, delay = 0, pricingRules = [], current = null, next = null }) => {
   const scale = useRef(new Animated.Value(1)).current;
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(16)).current;
@@ -67,7 +70,29 @@ const TableCard = ({ table, onPress, delay = 0, pricingRules = [] }) => {
           </View>
         </View>
 
-        {table.status === 'Occupied' && freeIn ? (
+        {current ? (
+          <View style={[styles.banner, styles.nowBanner]}>
+            <Ionicons name="play-circle" size={14} color={colors.success} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.bannerText} numberOfLines={1}>
+                <Text style={styles.nowStrong}>Now: </Text>
+                {current.memberName || 'Guest'} · {current.start}–{current.end}
+              </Text>
+              <Text style={styles.nowSub} numberOfLines={1}>
+                {bookingPricingText(current)} · {Math.max(Number(current.players) || 1, current.members?.length || 0)} player(s)
+              </Text>
+            </View>
+          </View>
+        ) : next ? (
+          <View style={styles.banner}>
+            <Ionicons name="calendar-outline" size={14} color={colors.primaryDark} />
+            <Text style={styles.bannerText} numberOfLines={1}>
+              Next <Text style={styles.bannerStrong}>{next.start}</Text> · {next.memberName || 'Guest'} · {bookingPricingText(next)}
+            </Text>
+          </View>
+        ) : null}
+
+        {!current && table.status === 'Occupied' && freeIn ? (
           <View style={styles.banner}>
             <Ionicons name="hourglass-outline" size={14} color={colors.primaryDark} />
             <Text style={styles.bannerText}>
@@ -82,6 +107,9 @@ const TableCard = ({ table, onPress, delay = 0, pricingRules = [] }) => {
 };
 
 const styles = StyleSheet.create({
+  nowBanner: { backgroundColor: colors.successSoft },
+  nowStrong: { color: colors.success, fontWeight: '800' },
+  nowSub: { fontSize: 11, color: colors.textLight, fontWeight: '600', marginTop: 1 },
   card: {
     backgroundColor: colors.surface,
     borderRadius: borderRadius.lg,

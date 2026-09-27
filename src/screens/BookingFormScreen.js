@@ -21,7 +21,7 @@ import {
 import {
   PRICING_MODES, DEFAULT_MODE, modesForType, pickRule, priceOf, rulesFor,
   computeCharge, gameMinutes, minMinutes, playersAllowed, ruleConstraints,
-  tierLabel, unitSuffix, minutesToLabel, slotsForMinutes,
+  tierLabel, unitSuffix, minutesToLabel, slotsForMinutes, bookingPricingText,
 } from '../data/pricing';
 import { useShots } from '../store/ShotsStore';
 import GradientButton from '../components/GradientButton';
@@ -55,9 +55,15 @@ const BookingFormScreen = ({ navigation, route }) => {
 
   const initialDuration = useMemo(() => {
     if (!existing) return DURATIONS[3]; // 1h
-    const mins = (existing.intervals?.length || 4) * 15;
-    return DURATIONS.find((d) => d.minutes === mins) || DURATIONS[3];
+    const mins = Number(existing.durationMinutes) || (existing.intervals?.length || 4) * 15;
+    return DURATIONS.find((d) => d.minutes === mins) || { label: minutesToLabel(mins), minutes: mins };
   }, [existing]);
+  // Preset chips + the booking's own length if it isn't one of them.
+  const durationChoices = useMemo(() => (
+    DURATIONS.some((d) => d.minutes === initialDuration.minutes)
+      ? DURATIONS
+      : [...DURATIONS, initialDuration].sort((a, b) => a.minutes - b.minutes)
+  ), [initialDuration]);
 
   const [duration, setDuration] = useState(initialDuration);
   const [isMember, setIsMember] = useState(existing ? existing.isMember !== false : true);
@@ -170,6 +176,20 @@ const BookingFormScreen = ({ navigation, route }) => {
     }
     return set;
   }, [bookings, table?.id, effectiveDate, editing, existing]);
+
+  if (editing && !existing) {
+    return (
+      <View style={styles.root}>
+        <ScreenHeader title="Amend Booking" subtitle="Booking not found" onBack={() => navigation.goBack()} variant="gradient" />
+        <View style={{ padding: spacing.xl, alignItems: 'center', gap: spacing.md }}>
+          <Ionicons name="alert-circle-outline" size={40} color={colors.textMuted} />
+          <Text style={{ ...typography.body, color: colors.textLight, textAlign: 'center' }}>
+            This booking could not be found — it may have been deleted. Go back and refresh the list.
+          </Text>
+        </View>
+      </View>
+    );
+  }
 
   if (!table) {
     return (
@@ -308,6 +328,18 @@ const BookingFormScreen = ({ navigation, route }) => {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
+          {editing ? (
+            <View style={styles.editingBanner}>
+              <Ionicons name="create" size={16} color={colors.primary} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.editingTitle}>Editing {existing.memberName || 'this booking'}</Text>
+                <Text style={styles.editingSub}>
+                  Currently: {bookingPricingText(existing)} · {Math.max(Number(existing.players) || 1, existing.members?.length || 0)} player(s) · Rs. {(existing.amount || 0).toLocaleString()}
+                </Text>
+              </View>
+            </View>
+          ) : null}
+
           {/* Summary */}
           <View style={styles.summary}>
             <View style={styles.summaryRow}>
@@ -552,7 +584,7 @@ const BookingFormScreen = ({ navigation, route }) => {
               </>
             ) : (
               <View style={styles.durRow}>
-                {DURATIONS.map((d) => (
+                {durationChoices.map((d) => (
                   <Pressable
                     key={d.label}
                     onPress={() => setDuration(d)}
@@ -762,6 +794,14 @@ const BreakRow = ({ label, value, color, bold }) => (
 );
 
 const styles = StyleSheet.create({
+  editingBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    backgroundColor: colors.primarySoft, borderRadius: borderRadius.lg,
+    borderWidth: 1, borderColor: colors.primary,
+    padding: spacing.md, marginBottom: spacing.md,
+  },
+  editingTitle: { ...typography.bodySmall, color: colors.text, fontWeight: '800' },
+  editingSub: { ...typography.caption, color: colors.textLight, marginTop: 2, textTransform: 'none', letterSpacing: 0 },
   root: { flex: 1, backgroundColor: colors.background },
   scroll: { padding: spacing.lg },
 

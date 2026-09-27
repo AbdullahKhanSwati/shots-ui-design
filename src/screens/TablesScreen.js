@@ -17,7 +17,7 @@ import { useShots } from '../store/ShotsStore';
 import TableCard from '../components/TableCard';
 import SearchBar from '../components/SearchBar';
 import FilterChips from '../components/FilterChips';
-import { bookingStatus, bookingPricingText } from '../data/pricing';
+import { bookingStatus, bookingPricingText, currentBookingFor, nextBookingFor } from '../data/pricing';
 
 const STATUS_OPTIONS = [
   { value: 'All', label: 'All', icon: 'apps' },
@@ -183,6 +183,8 @@ const TablesScreen = ({ navigation }) => {
                   key={t.id}
                   table={t}
                   pricingRules={pricingRules}
+                  current={currentBookingFor(bookings, t.id)}
+                  next={nextBookingFor(bookings, t.id)}
                   delay={i * 50}
                   onPress={() => navigation.navigate('TableDetail', { tableId: t.id })}
                 />
@@ -229,7 +231,10 @@ const TablesScreen = ({ navigation }) => {
                     <TouchableOpacity
                       key={b.id}
                       activeOpacity={0.85}
-                      onPress={() => navigation.navigate('TableDetail', { tableId: b.tableId })}
+                      // Tap opens THIS booking for editing (a cancelled one just shows its table).
+                      onPress={() => (cancelled
+                        ? navigation.navigate('TableDetail', { tableId: b.tableId })
+                        : navigation.navigate('BookingForm', { tableId: b.tableId, bookingId: b.id }))}
                       style={[styles.bookingCard, cancelled && styles.bookingCardCancelled]}
                     >
                       <View style={[
@@ -259,7 +264,7 @@ const TablesScreen = ({ navigation }) => {
                         <View style={styles.bookingMeta}>
                           <Ionicons name="people" size={11} color={colors.textLight} />
                           <Text style={styles.bookingMetaText}>
-                            {b.members?.length || 1} {(b.members?.length || 1) > 1 ? 'players' : 'player'}
+                            {playerCount(b)} {playerCount(b) > 1 ? 'players' : 'player'}
                           </Text>
                           <Text style={styles.bookingDot}>•</Text>
                           <Ionicons name={b.isMember ? 'diamond' : 'person'} size={11} color={colors.textLight} />
@@ -298,6 +303,9 @@ const TablesScreen = ({ navigation }) => {
     </View>
   );
 };
+
+// Players on a booking: the stored count, never fewer than its members.
+const playerCount = (b) => Math.max(Number(b.players) || 1, b.members?.length || 0);
 
 const SummaryItem = ({ icon, label, value, color }) => (
   <View style={styles.summaryItem}>

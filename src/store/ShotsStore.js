@@ -101,6 +101,10 @@ const uid = () => `local-${Date.now()}-${Math.random().toString(36).slice(2, 9)}
 // Distinguish "no internet" (retry later) from a real data error (drop the op).
 function isNetworkError(err) {
   if (!err) return true;
+  // An expired / not-yet-refreshed login (401 / PGRST301 / "JWT expired") is a
+  // "try again once the token is refreshed" situation — never a bad change.
+  // Treating it as a data error used to throw queued offline changes away.
+  if (err.status === 401 || err.code === 'PGRST301' || /jwt/i.test(String(err.message || ''))) return true;
   if (err.code) return false; // Postgres / PostgREST error code => real data error
   const msg = String(err.message || err).toLowerCase();
   return (
@@ -184,6 +188,13 @@ export function ShotsProvider({ children }) {
     flushingRef.current = true;
     let online = true;
     try {
+      // Only push with a usable login. getSession() refreshes an expired token
+      // first; if that isn't possible right now (offline) keep everything
+      // queued for later instead of failing each change.
+      let authed = false;
+      try { const { data } = await supabase.auth.getSession(); authed = !!data?.session; } catch (e) { authed = false; }
+      if (!authed) { online = false; return false; }
+
       while (outboxRef.current.length > 0) {
         const op = outboxRef.current[0];
         const cfg = CFG[op.entity];
@@ -406,7 +417,10 @@ export function ShotsProvider({ children }) {
       payload.memberName = payload.members.map((m) => m.name).join(', ');
     }
     if (!payload.memberId && payload.members?.[0]) payload.memberId = payload.members[0].id;
-    if (payload.members) payload.players = payload.members.length || 1;
+    // Players = what was entered (walk-ins have no members), never fewer than
+    // the members on the booking. Older builds overwrote it with the member
+    // count, so a 2-player walk-in was saved as 1 player.
+    payload.players = Math.max(Number(payload.players) || 1, payload.members?.length || 0);
     if (payload.status == null) payload.status = 'Active';
     const tempId = uid();
     const uiObj = { ...payload, id: tempId };
@@ -421,7 +435,9 @@ export function ShotsProvider({ children }) {
     if (payload.members) {
       payload.memberName = payload.members.map((m) => m.name).join(', ');
       payload.memberId = payload.members[0]?.id || null;
-      payload.players = payload.members.length || 1;
+      if (payload.players != null || payload.members.length) {
+        payload.players = Math.max(Number(payload.players) || 1, payload.members.length);
+      }
     }
     localUpdate('bookings', id, payload, toRow(payload, BOOKING_KEYS));
     return { id, ...payload };

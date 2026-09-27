@@ -25,6 +25,7 @@ import {
 } from '../data/mockData';
 import {
   modesForType, rulesFor, ruleConstraints, tierLabel, unitSuffix, bookingStatus, bookingPricingText,
+  currentBookingFor,
 } from '../data/pricing';
 import { useShots } from '../store/ShotsStore';
 import { uploadToBucket } from '../lib/supabase';
@@ -68,6 +69,8 @@ const TableDetailScreen = ({ navigation, route }) => {
   const isToday = dKey === dateKey(new Date());
   const nowValue = nowHHMM();
   const freeIn = table ? tableFreeIn(table) : null;
+  // The booking being played on this table right now (from its date + time).
+  const current = table ? currentBookingFor(bookings, table.id) : null;
 
   // Pick a table photo (camera or gallery), upload it, and persist the URL.
   // allowsEditing is off so the Android system crop screen (hard-to-see controls,
@@ -127,7 +130,7 @@ const TableDetailScreen = ({ navigation, route }) => {
           onPress: async () => {
             try {
               await updateTable(table.id, { status: 'Available', occupiedUntil: null, occupiedBy: null });
-              const active = bookings.find((b) => b.tableId === table.id && b.status === 'Active');
+              const active = currentBookingFor(bookings, table.id);
               if (active) {
                 await updateBooking(active.id, { status: 'Completed', end: nowHHMM() });
               }
@@ -299,6 +302,35 @@ const TableDetailScreen = ({ navigation, route }) => {
             </View>
           ) : null}
         </TouchableOpacity>
+
+        {/* What is being played on this table right now */}
+        {current ? (
+          <View style={styles.currentCard}>
+            <View style={styles.currentHead}>
+              <View style={styles.liveDot} />
+              <Text style={styles.currentTitle}>Playing now</Text>
+              <Text style={styles.currentTime}>{current.start} – {current.end}</Text>
+            </View>
+            <Text style={styles.currentName} numberOfLines={1}>{current.memberName || 'Guest'}</Text>
+            <Text style={styles.currentMeta}>
+              {bookingPricingText(current)} · {Math.max(Number(current.players) || 1, current.members?.length || 0)} player(s) · {current.isMember ? 'Member' : 'Guest'}
+            </Text>
+            <View style={styles.currentFoot}>
+              <Text style={styles.currentAmt}>Rs. {(current.amount || 0).toLocaleString()}</Text>
+              <TouchableOpacity
+                style={styles.currentBtn}
+                onPress={() => navigation.navigate('BookingForm', { tableId: table.id, bookingId: current.id })}
+              >
+                <Ionicons name="create-outline" size={14} color={colors.primary} />
+                <Text style={styles.currentBtnText}>Edit</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.currentBtn} onPress={() => setBookingModal({ booking: current })}>
+                <Ionicons name="information-circle-outline" size={14} color={colors.primary} />
+                <Text style={styles.currentBtnText}>Details</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
 
         {/* Pricing — every mode the admin has priced for this table type */}
         {priceModes.length > 0 ? (
@@ -497,7 +529,7 @@ const TableDetailScreen = ({ navigation, route }) => {
               <>
                 <View style={styles.detailCard}>
                   <DetailRow icon="time" label="Time" value={`${bookingModal.booking.start} → ${bookingModal.booking.end}`} />
-                  <DetailRow icon="people" label="Players" value={`${bookingModal.booking.members?.length || 1}`} />
+                  <DetailRow icon="people" label="Players" value={`${Math.max(Number(bookingModal.booking.players) || 1, bookingModal.booking.members?.length || 0)}`} />
                   <DetailRow icon="person" label="Member(s)" value={bookingModal.booking.memberName} />
                   <DetailRow icon={bookingModal.booking.isMember ? 'diamond' : 'walk'} label="Type" value={bookingModal.booking.isMember ? 'Member' : 'Guest'} />
                   <DetailRow icon="pricetags" label="Pricing" value={bookingPricingText(bookingModal.booking)} />
@@ -664,6 +696,28 @@ const styles = StyleSheet.create({
   priceValue: { ...typography.h4, marginTop: 2 },
   priceDivider: { width: 1, marginHorizontal: spacing.md, backgroundColor: colors.border },
 
+  currentCard: {
+    marginTop: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1.5, borderColor: colors.success,
+    padding: spacing.md,
+    ...shadows.sm,
+  },
+  currentHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.success },
+  currentTitle: { flex: 1, fontSize: 11, color: colors.success, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase' },
+  currentTime: { ...typography.caption, color: colors.textLight, fontWeight: '800', textTransform: 'none', letterSpacing: 0 },
+  currentName: { ...typography.h4, color: colors.text, marginTop: 4 },
+  currentMeta: { ...typography.bodySmall, color: colors.textLight, marginTop: 2 },
+  currentFoot: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
+  currentAmt: { flex: 1, ...typography.h4, color: colors.primary, fontWeight: '800' },
+  currentBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: spacing.sm + 2, paddingVertical: 6,
+    borderRadius: borderRadius.round, borderWidth: 1, borderColor: colors.primary,
+  },
+  currentBtnText: { fontSize: 12, color: colors.primary, fontWeight: '800' },
   rateCard: {
     backgroundColor: colors.surface,
     borderRadius: borderRadius.xl,

@@ -10,9 +10,16 @@ const SUPABASE_URL = 'https://ldzfbkngjeiwnotlaogf.supabase.co';
 const SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxkemZia25namVpd25vdGxhb2dmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4Mzc1NjksImV4cCI6MjA5ODQxMzU2OX0.ipJlwfNM7MoldGMchofVTj2SF-2VhRkY1uDJuqa9pdk';
 
+// Where auth-js keeps the session in AsyncStorage. This is exactly the key it
+// already used by default (sb-<project ref>-auth-token), so existing logins are
+// kept; it is spelled out so AuthContext can tell "offline but still signed
+// in" from "really signed out".
+export const AUTH_STORAGE_KEY = 'sb-ldzfbkngjeiwnotlaogf-auth-token';
+
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     storage: AsyncStorage,
+    storageKey: AUTH_STORAGE_KEY,
     persistSession: true,
     autoRefreshToken: true,
     // No URL session detection on native — there is no browser redirect.
