@@ -432,12 +432,17 @@ export function ShotsProvider({ children }) {
 
   const updateBooking = useCallback(async (id, patch) => {
     const payload = { ...patch };
-    if (payload.members) {
+    // Member bookings take their name from the selected members. A non-member
+    // (walk-in) booking has no members — keep the guest name that was typed,
+    // instead of overwriting it with an empty string.
+    if (payload.members?.length) {
       payload.memberName = payload.members.map((m) => m.name).join(', ');
       payload.memberId = payload.members[0]?.id || null;
-      if (payload.players != null || payload.members.length) {
-        payload.players = Math.max(Number(payload.players) || 1, payload.members.length);
-      }
+    } else if (payload.isMember === false) {
+      payload.memberId = null;
+    }
+    if (payload.members && (payload.players != null || payload.members.length)) {
+      payload.players = Math.max(Number(payload.players) || 1, payload.members.length);
     }
     localUpdate('bookings', id, payload, toRow(payload, BOOKING_KEYS));
     return { id, ...payload };
