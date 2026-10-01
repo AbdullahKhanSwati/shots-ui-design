@@ -17,6 +17,7 @@ import { colors, gradients, typography, spacing, borderRadius, shadows } from '.
 import GradientButton from '../components/GradientButton';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { loadRememberedLogin, saveRememberedLogin } from '../lib/rememberLogin';
 
 const LoginScreen = ({ navigation, route }) => {
   const { login } = useAuth();
@@ -25,6 +26,7 @@ const LoginScreen = ({ navigation, route }) => {
   const [password, setPassword] = useState(business?.defaultPassword || '');
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [remember, setRemember] = useState(true);
 
   // The workspace picker is skipped, so no business is handed to us via params.
   // Prefill the Shots staff credentials directly (only while the fields are
@@ -33,6 +35,14 @@ const LoginScreen = ({ navigation, route }) => {
     if (business) return;
     let active = true;
     (async () => {
+      // The last login saved with "Remember me" wins over the defaults.
+      const saved = await loadRememberedLogin();
+      if (!active) return;
+      if (saved) {
+        setEmail((prev) => prev || saved.email);
+        setPassword((prev) => prev || saved.password);
+        return;
+      }
       const { data } = await supabase
         .from('businesses')
         .select('default_email, default_password')
@@ -62,6 +72,7 @@ const LoginScreen = ({ navigation, route }) => {
     setLoading(true);
     try {
       await login(email, password);
+      await saveRememberedLogin(remember, email, password);
       navigation.replace('Main');
     } catch (e) {
       Alert.alert('Sign in failed', e?.message || 'Please check your credentials and try again.');
@@ -120,12 +131,12 @@ const LoginScreen = ({ navigation, route }) => {
               />
 
               <View style={styles.rowBetween}>
-                <View style={styles.rememberRow}>
-                  <View style={styles.check}>
-                    <Ionicons name="checkmark" size={12} color={colors.white} />
+                <TouchableOpacity style={styles.rememberRow} onPress={() => setRemember((r) => !r)} hitSlop={8} activeOpacity={0.7}>
+                  <View style={[styles.check, !remember && styles.checkOff]}>
+                    {remember ? <Ionicons name="checkmark" size={12} color={colors.white} /> : null}
                   </View>
                   <Text style={styles.remember}>Remember me</Text>
-                </View>
+                </TouchableOpacity>
                 <TouchableOpacity hitSlop={10}>
                   <Text style={styles.forgot}>Forgot password?</Text>
                 </TouchableOpacity>
@@ -262,6 +273,11 @@ const styles = StyleSheet.create({
     width: 18, height: 18, borderRadius: 4,
     backgroundColor: colors.primary,
     alignItems: 'center', justifyContent: 'center',
+  },
+  checkOff: {
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: colors.textLight,
   },
   remember: {
     ...typography.bodySmall,

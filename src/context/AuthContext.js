@@ -103,11 +103,9 @@ export function AuthProvider({ children }) {
         if (isUserDeleted(error)) { await revoke(); return false; }
         return true; // offline / token being refreshed — try again later
       }
-      if (!data?.user) return true;
-      const { data: prof, error: profErr } = await supabase
-        .from('profiles').select('user_id').eq('user_id', data.user.id).maybeSingle();
-      // Server reachable, user valid, but the profile row is gone → removed.
-      if (!profErr && !prof) { await revoke(); return false; }
+      // A deleted login is reported by getUser() itself (user_not_found). An
+      // empty profiles answer is not proof of anything (it can happen for a
+      // moment while the token refreshes), so it never signs anyone out.
     } catch (e) {
       /* offline — try again later */
     }
@@ -157,7 +155,7 @@ export function AuthProvider({ children }) {
       if (info.missingProfile) {
         // Confirm with the auth server before signing anyone out.
         const { data, error } = await supabase.auth.getUser().catch(() => ({ data: null, error: null }));
-        if (isUserDeleted(error) || (data?.user && !error)) { await revoke(); return; }
+        if (isUserDeleted(error)) { await revoke(); return; }
       }
       setRevoked(false);
       setSession({ user, email: user.email, profile: info.profile, businessId: info.businessId, business: info.business, offline: false });
