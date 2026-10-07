@@ -2,10 +2,14 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography, spacing, borderRadius, shadows } from '../styles/theme';
+import { useColumns, cellWidth } from '../lib/responsive';
 
 const StatCard = ({ label, value, icon, color = colors.primary, trend, delay = 0 }) => {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(20)).current;
+  // 2 across on a phone (unchanged), 3-4 on a tablet or in landscape, and a
+  // single full-width card on very narrow screens so the figures stay readable.
+  const columns = useColumns({ min: 150, max: 4 });
 
   useEffect(() => {
     Animated.parallel([
@@ -15,7 +19,7 @@ const StatCard = ({ label, value, icon, color = colors.primary, trend, delay = 0
   }, [opacity, translateY, delay]);
 
   return (
-    <Animated.View style={[styles.card, { opacity, transform: [{ translateY }] }]}>
+    <Animated.View style={[styles.card, { width: cellWidth(columns), opacity, transform: [{ translateY }] }]}>
       <View style={[styles.iconBubble, { backgroundColor: `${color}1A` }]}>
         <Ionicons name={icon} size={20} color={color} />
       </View>
@@ -39,7 +43,7 @@ const StatCard = ({ label, value, icon, color = colors.primary, trend, delay = 0
 
 const styles = StyleSheet.create({
   card: {
-    width: '48%',
+    // width comes from the column count above (48% on a phone).
     backgroundColor: colors.surface,
     borderRadius: borderRadius.lg,
     padding: spacing.lg,

@@ -1,5 +1,5 @@
-import React from 'react';
-import { StyleSheet, Platform } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, StyleSheet, Platform, View } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createDrawerNavigator } from '@react-navigation/drawer';
@@ -29,6 +29,17 @@ export function isAdminRole(role) {
   return ['admin', 'owner'].includes(String(role || '').toLowerCase());
 }
 
+// Where a signed-in user lands: the Dashboard when they may see it, otherwise
+// Bookings. `initialRouteName` is read ONCE when the tabs mount, so the role has
+// to be known by then — see the gate in DashboardTabNavigator.
+function landingTab(role) {
+  return isAdminRole(role) ? 'Dashboard' : 'Bookings';
+}
+
+// How long to wait for the role before giving up and showing Bookings. Only
+// reached when the profile can't be fetched (offline with nothing cached).
+const ROLE_WAIT_MS = 2500;
+
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 const Drawer = createDrawerNavigator();
@@ -46,11 +57,32 @@ const TAB_ICONS = {
 const DashboardTabNavigator = () => {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
-  const isAdmin = isAdminRole(session?.profile?.role);
+  const role = session?.profile?.role;
+  const isAdmin = isAdminRole(role);
+
+  // The profile (and with it the role) is fetched after sign-in, so right after
+  // logging in the role is usually still unknown. Mounting the tabs then would
+  // fix the landing tab as Bookings for everyone — admins included, which is
+  // why they used to land on the wrong screen. Hold the tabs for a moment until
+  // the role is known, with a short cap so an unreachable profile can't hang.
+  const [roleReady, setRoleReady] = useState(() => !!role);
+  useEffect(() => {
+    if (role) { setRoleReady(true); return undefined; }
+    const t = setTimeout(() => setRoleReady(true), ROLE_WAIT_MS);
+    return () => clearTimeout(t);
+  }, [role]);
+
+  if (!roleReady) {
+    return (
+      <View style={styles.landingGate}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
 
   return (
     <Tab.Navigator
-      initialRouteName={isAdmin ? 'Dashboard' : 'Members'}
+      initialRouteName={landingTab(role)}
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarShowLabel: true,
@@ -147,6 +179,7 @@ const RootNavigator = () => {
 };
 
 const styles = StyleSheet.create({
+  landingGate: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background },
   activeIconWrap: {
     width: 32,
     height: 32,
