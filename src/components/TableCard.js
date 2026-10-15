@@ -3,7 +3,7 @@ import { Animated, StyleSheet, Text, View, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography, spacing, borderRadius, shadows } from '../styles/theme';
 import { tableFreeIn } from '../data/mockData';
-import { priceSummary, bookingPricingText } from '../data/pricing';
+import { bookingPricingText } from '../data/pricing';
 
 const statusMeta = {
   Available:   { color: colors.success, bg: colors.successSoft, icon: 'checkmark-circle' },
@@ -14,7 +14,8 @@ const statusMeta = {
 // current / next: the booking playing now and the next one today (from
 // currentBookingFor / nextBookingFor) — shown so staff can see at a glance who
 // is on the table and what they paid for (e.g. "Per Game · 2 games").
-const TableCard = ({ table, onPress, delay = 0, pricingRules = [], current = null, next = null }) => {
+// Prices are deliberately not shown here; staff see them after picking a table.
+const TableCard = ({ table, onPress, delay = 0, current = null, next = null }) => {
   const scale = useRef(new Animated.Value(1)).current;
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(16)).current;
@@ -28,9 +29,6 @@ const TableCard = ({ table, onPress, delay = 0, pricingRules = [], current = nul
 
   const meta = statusMeta[table.status] || statusMeta.Available;
   const freeIn = tableFreeIn(table);
-  // Prices come from the type's pricing rules; fall back to the table's own
-  // hourly rates for any type the admin hasn't priced yet.
-  const summary = priceSummary(pricingRules, table.type, true);
 
   return (
     <Animated.View style={{ opacity, transform: [{ translateY }, { scale }] }}>
@@ -55,17 +53,6 @@ const TableCard = ({ table, onPress, delay = 0, pricingRules = [], current = nul
             <View style={styles.metaRow}>
               <Ionicons name="location-outline" size={12} color={colors.textLight} />
               <Text style={styles.metaText} numberOfLines={1}>{table.location}</Text>
-            </View>
-            <View style={styles.metaRow}>
-              <Ionicons name="pricetag-outline" size={12} color={colors.textLight} />
-              {summary ? (
-                <Text style={styles.metaText} numberOfLines={2}>{summary}</Text>
-              ) : (
-                <Text style={styles.metaText}>
-                  Rs. {table.memberRate} / {table.nonMemberRate}{' '}
-                  <Text style={styles.metaSub}>member / non-member</Text>
-                </Text>
-              )}
             </View>
           </View>
         </View>
@@ -137,7 +124,6 @@ const styles = StyleSheet.create({
     textTransform: 'none',
     letterSpacing: 0,
   },
-  metaSub: { color: colors.textMuted, fontWeight: '500' },
   statusPill: {
     position: 'absolute',
     top: spacing.sm,

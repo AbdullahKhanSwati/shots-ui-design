@@ -123,6 +123,9 @@ const LoginScreen = ({ navigation, route }) => {
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry={!showPass}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="password"
                 trailing={
                   <TouchableOpacity onPress={() => setShowPass((s) => !s)} hitSlop={10}>
                     <Ionicons name={showPass ? 'eye-off-outline' : 'eye-outline'} size={18} color={colors.textLight} />

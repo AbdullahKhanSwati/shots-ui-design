@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -55,7 +55,8 @@ const MenuDrawer = ({ navigation }) => {
     {
       title: 'More',
       items: [
-        { icon: 'globe-outline', label: 'Admin Panel (Web)', onPress: openAdminPanel },
+        // Staff must not see the backend link; admins/owners only.
+        ...(isAdmin ? [{ icon: 'globe-outline', label: 'Admin Panel (Web)', onPress: openAdminPanel }] : []),
         { icon: 'log-out-outline', label: 'Logout', danger: true, onPress: handleLogout },
       ],
     },
@@ -66,9 +67,7 @@ const MenuDrawer = ({ navigation }) => {
       <LinearGradient colors={gradients.cardDark} style={styles.header}>
         <View style={styles.glow} />
         <View style={styles.brandRow}>
-          <LinearGradient colors={gradients.brand} style={styles.brandLogo}>
-            <Ionicons name="game-controller" size={22} color={colors.white} />
-          </LinearGradient>
+          <Image source={require('../../assets/brand-logo.png')} style={styles.brandLogo} resizeMode="contain" />
           <View>
             <Text style={styles.brandName}>SHOTS</Text>
             <Text style={styles.brandTag}>Staff Console</Text>
@@ -144,12 +143,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     marginBottom: spacing.lg,
   },
-  brandLogo: {
-    width: 40, height: 40,
-    borderRadius: borderRadius.md,
-    alignItems: 'center', justifyContent: 'center',
-    ...shadows.redSoft,
-  },
+  brandLogo: { width: 52, height: 52 },
   brandName: { ...typography.h3, color: colors.white, letterSpacing: 3 },
   brandTag: { ...typography.caption, color: 'rgba(255,255,255,0.65)', textTransform: 'uppercase' },
   profileRow: {

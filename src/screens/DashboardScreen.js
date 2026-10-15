@@ -15,6 +15,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { colors, gradients, typography, spacing, borderRadius, shadows } from '../styles/theme';
 import { dateKey, timeframeRange } from '../data/mockData';
 import { useShots } from '../store/ShotsStore';
+import { useAuth } from '../context/AuthContext';
 import StatCard from '../components/StatCard';
 
 const TIMEFRAMES = [
@@ -29,6 +30,8 @@ const TIMEFRAMES = [
 const DashboardScreen = ({ navigation }) => {
   const insets = useSafeAreaInsets();
   const { bookings, finance, members } = useShots();
+  const { session } = useAuth();
+  const displayName = (session?.profile?.name || '').trim() || (session?.email || '').split('@')[0] || 'there';
   const fade = useRef(new Animated.Value(0)).current;
 
   // Overview timeframe — defaults to month-to-date and resets to it every time
@@ -99,7 +102,7 @@ const DashboardScreen = ({ navigation }) => {
         </View>
 
         <Animated.View style={{ opacity: fade }}>
-          <Text style={styles.greeting}>Good day, Staff 👋</Text>
+          <Text style={styles.greeting} numberOfLines={1}>Good day, {displayName} 👋</Text>
           <Text style={styles.greetingDate}>{todayLabel}</Text>
 
           <View style={styles.heroStatsRow}>
