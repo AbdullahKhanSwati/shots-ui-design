@@ -28,6 +28,7 @@ import { signedUrl, uploadToBucket } from '../lib/supabase';
 import MembershipVirtualCard from '../components/MembershipVirtualCard';
 import ScreenHeader from '../components/ScreenHeader';
 import GradientButton from '../components/GradientButton';
+import KeyboardModal from '../components/KeyboardModal';
 
 const MemberDetailScreen = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
@@ -530,7 +531,7 @@ const MemberDetailScreen = ({ navigation, route }) => {
       </View>
 
       {/* Renew sheet */}
-      <Modal visible={renewOpen} transparent animationType="slide" onRequestClose={() => setRenewOpen(false)}>
+      <KeyboardModal visible={renewOpen} transparent animationType="slide" onRequestClose={() => setRenewOpen(false)}>
         <KeyboardProvider>
         <View style={styles.modalOverlay}>
           <KeyboardAvoidingView behavior="padding" style={{ width: '100%' }}>
@@ -587,10 +588,10 @@ const MemberDetailScreen = ({ navigation, route }) => {
           </KeyboardAvoidingView>
         </View>
         </KeyboardProvider>
-      </Modal>
+      </KeyboardModal>
 
       {/* Edit member info */}
-      <Modal visible={editOpen} transparent animationType="slide" onRequestClose={() => setEditOpen(false)}>
+      <KeyboardModal visible={editOpen} transparent animationType="slide" onRequestClose={() => setEditOpen(false)}>
         <KeyboardProvider>
         <View style={styles.modalOverlay}>
           <KeyboardAvoidingView behavior="padding" style={{ width: '100%' }}>
@@ -685,10 +686,10 @@ const MemberDetailScreen = ({ navigation, route }) => {
           </KeyboardAvoidingView>
         </View>
         </KeyboardProvider>
-      </Modal>
+      </KeyboardModal>
 
       {/* Full-screen photo viewer (member photo / ID card) */}
-      <Modal visible={!!photoViewer} transparent animationType="fade" onRequestClose={() => setPhotoViewer(null)}>
+      <KeyboardModal visible={!!photoViewer} transparent animationType="fade" onRequestClose={() => setPhotoViewer(null)}>
         <View style={styles.viewerOverlay}>
           <TouchableOpacity
             style={styles.viewerClose}
@@ -701,7 +702,7 @@ const MemberDetailScreen = ({ navigation, route }) => {
             <Image source={{ uri: photoViewer }} style={styles.viewerImage} resizeMode="contain" />
           ) : null}
         </View>
-      </Modal>
+      </KeyboardModal>
     </View>
   );
 };

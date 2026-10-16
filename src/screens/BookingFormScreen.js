@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import {
   Alert,
   Image,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -27,6 +26,7 @@ import { useShots } from '../store/ShotsStore';
 import GradientButton from '../components/GradientButton';
 import ScreenHeader from '../components/ScreenHeader';
 import SearchBar from '../components/SearchBar';
+import KeyboardModal from '../components/KeyboardModal';
 
 const DURATIONS = [
   { label: '15 min', minutes: 15 },
@@ -698,7 +698,7 @@ const BookingFormScreen = ({ navigation, route }) => {
         </View>
 
       {/* Member picker modal */}
-      <Modal
+      <KeyboardModal
         visible={memberPickerOpen}
         animationType="slide"
         transparent
@@ -771,7 +771,7 @@ const BookingFormScreen = ({ navigation, route }) => {
             </View>
           </View>
         </View>
-      </Modal>
+      </KeyboardModal>
     </View>
   );
 };
