@@ -7,6 +7,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  AppState,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -44,6 +45,19 @@ const DashboardScreen = ({ navigation }) => {
     Animated.timing(fade, { toValue: 1, duration: 400, useNativeDriver: true }).start();
   }, [fade]);
 
+  // Re-render when the day changes while the screen stays open, or when the app
+  // comes back to the front, so "today" is always the real today.
+  const [dayTick, setDayTick] = useState(0);
+  useEffect(() => {
+    let day = dateKey(new Date());
+    const check = () => {
+      const k = dateKey(new Date());
+      if (k !== day) { day = k; setDayTick((t) => t + 1); }
+    };
+    const sub = AppState.addEventListener('change', (st) => { if (st === 'active') check(); });
+    const timer = setInterval(check, 60 * 1000);
+    return () => { sub.remove(); clearInterval(timer); };
+  }, []);
   const todayDate = new Date();
   const todayLabel = todayDate.toLocaleDateString('en-US', {
     weekday: 'long', month: 'long', day: 'numeric',
@@ -79,7 +93,7 @@ const DashboardScreen = ({ navigation }) => {
       net: membershipRevenue + bookingRevenue - expenses,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeframe, finance, bookings]);
+  }, [timeframe, finance, bookings, dayTick]);
 
   // The phone keeps the last 13 months. This Year / All Time reaching further
   // back are totalled by the server; offline (or before
@@ -102,7 +116,7 @@ const DashboardScreen = ({ navigation }) => {
       .catch(() => {});
     return () => { active = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeframe, finance.length, bookings.length]);
+  }, [timeframe, finance.length, bookings.length, dayTick]);
   const overview = serverOverview || localOverview;
 
   return (
