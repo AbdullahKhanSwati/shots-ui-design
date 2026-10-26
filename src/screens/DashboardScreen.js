@@ -14,7 +14,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, gradients, typography, spacing, borderRadius, shadows } from '../styles/theme';
 import { dateKey, timeframeRange } from '../data/mockData';
-import { useShots } from '../store/ShotsStore';
+import { useShots, historyCutoffIso } from '../store/ShotsStore';
+import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import StatCard from '../components/StatCard';
 
@@ -58,7 +59,7 @@ const DashboardScreen = ({ navigation }) => {
   const todayRevenue = todayActive.reduce((s, b) => s + (b.amount || 0), 0);
 
   // Overview — computed for the selected timeframe.
-  const overview = useMemo(() => {
+  const localOverview = useMemo(() => {
     const range = timeframeRange(timeframe, todayDate);
     const inRange = (d) => !range || (d >= range.start && d <= range.end);
 
@@ -79,6 +80,30 @@ const DashboardScreen = ({ navigation }) => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeframe, finance, bookings]);
+
+  // The phone keeps the last 13 months. This Year / All Time reaching further
+  // back are totalled by the server; offline (or before
+  // shots_migration_app_speed.sql is run) the phone's own figures are shown.
+  const [serverOverview, setServerOverview] = useState(null);
+  useEffect(() => {
+    const range = timeframeRange(timeframe, todayDate);
+    const needsServer = !range || range.start < historyCutoffIso();
+    setServerOverview(null);
+    if (!needsServer) return undefined;
+    let active = true;
+    supabase.rpc('shots_period_totals', { p_from: range?.start || null, p_to: range?.end || null })
+      .then(({ data, error }) => {
+        if (!active || error || !data) return;
+        const membershipRevenue = Number(data.membershipRevenue) || 0;
+        const bookingRevenue = Number(data.bookingRevenue) || 0;
+        const expenses = Number(data.expenses) || 0;
+        setServerOverview({ membershipRevenue, bookingRevenue, expenses, net: membershipRevenue + bookingRevenue - expenses });
+      })
+      .catch(() => {});
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeframe, finance.length, bookings.length]);
+  const overview = serverOverview || localOverview;
 
   return (
     <View style={styles.root}>

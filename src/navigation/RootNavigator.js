@@ -85,6 +85,8 @@ const DashboardTabNavigator = () => {
       initialRouteName={landingTab(role)}
       screenOptions={({ route }) => ({
         headerShown: false,
+        // Tabs you are not looking at stop re-rendering on every data update.
+        freezeOnBlur: true,
         tabBarShowLabel: true,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textMuted,

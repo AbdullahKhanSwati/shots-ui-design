@@ -14,6 +14,7 @@ import { useShots } from '../store/ShotsStore';
 import MembershipCard from '../components/MembershipCard';
 import SearchBar from '../components/SearchBar';
 import FilterChips from '../components/FilterChips';
+import { usePagedList } from '../lib/usePagedList';
 
 const buildFilters = (members) => [
   { value: 'All', label: 'All', icon: 'apps', count: members.length },
@@ -45,6 +46,8 @@ const MembershipsScreen = ({ navigation }) => {
       return matchQ && matchF;
     });
   }, [members, query, filter]);
+  // Show 20 members at a time; scrolling down loads the next 20.
+  const page = usePagedList(list, { resetKey: `${filter}|${query}` });
 
   const activeCount = members.filter((m) => m.status === 'Active').length;
   const expiredCount = members.filter((m) => m.status === 'Expired').length;
@@ -81,7 +84,8 @@ const MembershipsScreen = ({ navigation }) => {
       <FilterChips items={buildFilters(members)} value={filter} onChange={setFilter} />
 
       <FlatList
-        data={list}
+        data={page.data}
+        {...page.listProps}
         keyExtractor={(item) => item.id}
         contentContainerStyle={[styles.list, { paddingBottom: 90 + insets.bottom }]}
         showsVerticalScrollIndicator={false}

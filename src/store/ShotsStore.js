@@ -7,12 +7,38 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { AppState } from 'react-native';
+import { AppState, InteractionManager } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { generateMemberId } from '../data/mockData';
 import { getCache, setCache } from '../lib/offlineCache';
+
+// How much history the app keeps on the phone: the last 13 months of bookings
+// and transactions (+ all future bookings). Downloading EVERY booking and
+// transaction on each sync made the app hang. The Dashboard's This Year / All
+// Time totals come from the server (shots_period_totals); the admin panel has
+// everything.
+export const HISTORY_MONTHS = 13;
+const pad2c = (n) => String(n).padStart(2, '0');
+export const historyCutoffIso = () => {
+  const d = new Date(); d.setMonth(d.getMonth() - HISTORY_MONTHS, 1);
+  return `${d.getFullYear()}-${pad2c(d.getMonth() + 1)}-${pad2c(d.getDate())}`;
+};
+// All rows since the cutoff, 1000 at a time (the server returns at most 1000
+// per request, so one plain select silently dropped the rest).
+async function selectRecent(table) {
+  const out = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase.from(table).select('*')
+      .gte('date', historyCutoffIso())
+      .order('date', { ascending: true }).order('id', { ascending: true })
+      .range(from, from + 999);
+    if (error) return { data: null, error };
+    out.push(...(data || []));
+    if (!data || data.length < 1000) return { data: out, error: null };
+  }
+}
 
 /**
  * Offline-first data store backed by Supabase.
@@ -149,15 +175,21 @@ export function ShotsProvider({ children }) {
   }, []);
 
   // ---- Server pull (offline-safe) -----------------------------------------
+  // One pull at a time; a request that arrives meanwhile runs once afterwards.
+  const pullingRef = useRef(null);
+  const pullAgainRef = useRef(false);
+  const pullFromServerRef = useRef(null);
   const pullFromServer = useCallback(async () => {
     const bid = businessIdRef.current;
     if (!bid) return false;
+    if (pullingRef.current) { pullAgainRef.current = true; return pullingRef.current; }
+    const run = (async () => {
     try {
       const [t, m, b, f, tt, pr, bs] = await Promise.all([
         supabase.from('pool_tables').select('*').order('number', { ascending: true }),
         supabase.from('members').select('*').order('created_at', { ascending: true }),
-        supabase.from('bookings').select('*').order('date', { ascending: true }),
-        supabase.from('transactions').select('*').order('date', { ascending: true }),
+        selectRecent('bookings'),
+        selectRecent('transactions'),
         supabase.from('table_types').select('*').order('sort_order', { ascending: true }),
         supabase.from('pricing_rules').select('*').order('sort_order', { ascending: true }),
         supabase.from('business_settings').select('profile').eq('business_id', bid).maybeSingle(),
@@ -177,7 +209,16 @@ export function ShotsProvider({ children }) {
       setOffline(true);
       return false;
     }
+    })();
+    pullingRef.current = run;
+    try {
+      return await run;
+    } finally {
+      pullingRef.current = null;
+      if (pullAgainRef.current) { pullAgainRef.current = false; setTimeout(() => pullFromServerRef.current?.(), 0); }
+    }
   }, []);
+  pullFromServerRef.current = pullFromServer;
 
   // ---- Outbox flush --------------------------------------------------------
   // Returns true if the queue drained (fully synced), false if it stopped
@@ -280,21 +321,32 @@ export function ShotsProvider({ children }) {
   // Re-sync when the network returns or the app comes back to the foreground.
   useEffect(() => {
     if (!businessId) return;
+    // NetInfo reports often (signal changes, reachability probes); only a real
+    // offline → online change needs a sync.
+    let wasConnected = null;
     const unsub = NetInfo.addEventListener((state) => {
-      const connected = state.isConnected && state.isInternetReachable !== false;
-      if (connected) sync();
-      else setOffline(true);
+      const connected = !!(state.isConnected && state.isInternetReachable !== false);
+      if (connected && wasConnected === false) sync();
+      if (!connected) setOffline(true);
+      wasConnected = connected;
     });
     const appSub = AppState.addEventListener('change', (s) => { if (s === 'active') sync(); });
     return () => { if (typeof unsub === 'function') unsub(); appSub.remove(); };
   }, [businessId, sync]);
 
   // Persist a snapshot for offline viewing after each state change.
+  // Written at most every 3 s and only once the phone is idle.
   useEffect(() => {
-    if (!businessId || !ready) return;
-    setCache(`data:${businessId}`, {
-      tables, members, bookings, finance, tableTypes, pricingRules, businessName,
-    });
+    if (!businessId || !ready) return undefined;
+    let task = null;
+    const timer = setTimeout(() => {
+      task = InteractionManager.runAfterInteractions(() => {
+        setCache(`data:${businessId}`, {
+          tables, members, bookings, finance, tableTypes, pricingRules, businessName,
+        });
+      });
+    }, 3000);
+    return () => { clearTimeout(timer); if (task) task.cancel(); };
   }, [businessId, ready, tables, members, bookings, finance, tableTypes, pricingRules, businessName]);
 
   // Live sync: reflect changes made elsewhere (admin dashboard, other staff).
@@ -314,12 +366,12 @@ export function ShotsProvider({ children }) {
       },
       bookings: async () => {
         if (outboxRef.current.length) return;
-        const { data } = await supabase.from('bookings').select('*').order('date', { ascending: true });
+        const { data } = await selectRecent('bookings');
         setBookings((data || []).map(rowToBooking));
       },
       transactions: async () => {
         if (outboxRef.current.length) return;
-        const { data } = await supabase.from('transactions').select('*').order('date', { ascending: true });
+        const { data } = await selectRecent('transactions');
         setFinance((data || []).map(rowToFinance));
       },
       // Config the admin dashboard owns — never queued locally, so always safe
@@ -333,16 +385,22 @@ export function ShotsProvider({ children }) {
         setPricingRules((data || []).map(rowToPricingRule));
       },
     };
+    // A burst of changes to one table becomes ONE refetch of that table.
+    const timers = {};
+    const schedule = (table) => {
+      if (timers[table]) clearTimeout(timers[table]);
+      timers[table] = setTimeout(() => { refetch[table](); }, 1500);
+    };
     const channel = supabase.channel(`shots-rt-${businessId}`);
     Object.keys(refetch).forEach((table) => {
       channel.on(
         'postgres_changes',
         { event: '*', schema: 'public', table, filter: `business_id=eq.${businessId}` },
-        () => { refetch[table](); }
+        () => schedule(table)
       );
     });
     channel.subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => { Object.values(timers).forEach(clearTimeout); supabase.removeChannel(channel); };
   }, [businessId]);
 
   // ---- Local-first mutation primitives ------------------------------------

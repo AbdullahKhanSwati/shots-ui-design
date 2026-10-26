@@ -17,6 +17,7 @@ import {
 import { useShots } from '../store/ShotsStore';
 import SearchBar from '../components/SearchBar';
 import FilterChips from '../components/FilterChips';
+import { usePagedList } from '../lib/usePagedList';
 
 const TYPES = [
   { value: 'All', label: 'All', icon: 'apps' },
@@ -64,6 +65,18 @@ const FinanceScreen = ({ navigation }) => {
       });
     return Array.from(map.entries());
   }, [items]);
+  // Show 20 transactions at a time; scrolling down loads the next 20.
+  const page = usePagedList(useMemo(() => grouped.flatMap(([, l]) => l), [grouped]), {
+    resetKey: `${monthIndex}|${type}|${query}`,
+  });
+  const visibleGroups = useMemo(() => {
+    const map = new Map();
+    page.data.forEach((it) => {
+      if (!map.has(it.date)) map.set(it.date, []);
+      map.get(it.date).push(it);
+    });
+    return Array.from(map.entries());
+  }, [page.data]);
 
   const headingLabel = isCurrentMonth ? `${selectedMonth.label} · to date` : selectedMonth.label;
   const todayKey = dateKey(new Date());
@@ -125,6 +138,8 @@ const FinanceScreen = ({ navigation }) => {
       <ScrollView
         contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 110 }]}
         showsVerticalScrollIndicator={false}
+        onScroll={page.onScroll}
+        scrollEventThrottle={100}
       >
         {grouped.length === 0 ? (
           <View style={styles.empty}>
@@ -132,7 +147,7 @@ const FinanceScreen = ({ navigation }) => {
             <Text style={styles.emptyText}>No transactions for this period</Text>
           </View>
         ) : (
-          grouped.map(([date, list]) => (
+          visibleGroups.map(([date, list]) => (
             <View key={date} style={{ marginBottom: spacing.md }}>
               <Text style={styles.dateLabel}>
                 {date === todayKey ? 'Today' : new Date(date).toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' })}
@@ -160,6 +175,7 @@ const FinanceScreen = ({ navigation }) => {
             </View>
           ))
         )}
+        {grouped.length ? page.footer : null}
       </ScrollView>
 
       <TouchableOpacity
